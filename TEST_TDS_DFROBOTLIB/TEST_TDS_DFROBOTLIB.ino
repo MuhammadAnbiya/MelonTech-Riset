@@ -1,3 +1,5 @@
+// Kalibrasi dari hasil library DF Robot yang di modifikasi
+
 #include <EEPROM.h>
 #include "GravityTDS.h"
 
