@@ -1,23 +1,35 @@
-const int tdsPin = A0; // ADC ESP8266
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+// Pin data DS18B20 ke ESP32-S3
+const int oneWireBus = 2; // Ganti sesuai pin yang digunakan
+
+// Setup oneWire instance
+OneWire oneWire(oneWireBus);
+
+// Pass oneWire reference ke DallasTemperature library
+DallasTemperature sensors(&oneWire);
 
 void setup() {
-  Serial.begin(115200);  // Serial Monitor harus sama: 115200
+  Serial.begin(115200);
   delay(1000);
-  Serial.println("TDS Sensor ESP8266 siap...");
+  Serial.println("DS18B20 ESP32-S3 siap...");
+
+  sensors.begin(); // Inisialisasi sensor
 }
 
 void loop() {
-  int sensorValue = analogRead(tdsPin);  
-  float voltage = sensorValue * (3.3 / 1023.0); // NodeMCU internal divider 0-3.3V
-  float tdsValue = voltage * 500; // faktor kalibrasi sensor, sesuaikan
+  sensors.requestTemperatures(); // Minta data suhu dari sensor
+  float temperatureC = sensors.getTempCByIndex(0); // Ambil sensor pertama
 
-  Serial.print("ADC: ");
-  Serial.print(sensorValue);
-  Serial.print("\tVoltage: ");
-  Serial.print(voltage, 2);
-  Serial.print(" V\tTDS: ");
-  Serial.print(tdsValue, 2);
-  Serial.println(" ppm");
+  // Cek apakah sensor terbaca
+  if(temperatureC == DEVICE_DISCONNECTED_C){
+    Serial.println("Sensor tidak terbaca!");
+  } else {
+    Serial.print("Suhu: ");
+    Serial.print(temperatureC, 2); // tampilkan 2 angka dibelakang koma
+    Serial.println(" °C");
+  }
 
   delay(1000);
 }
