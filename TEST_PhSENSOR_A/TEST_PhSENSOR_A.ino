@@ -4,7 +4,7 @@
 // Inisialisasi LCD I2C (alamat umum 0x27, bisa 0x3F tergantung modul)
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-float calibration_value = 21.34 - 2.87;
+float calibration_value = 21.34 - 0.8;
 unsigned long int avgval;
 int buffer_arr[10], temp;
 float ph_act;
@@ -15,6 +15,9 @@ float ph_act;
 void setup() {
   Wire.begin();
   Serial.begin(115200);   // Baudrate umum ESP32
+
+  analogSetPinAttenuation(PH_SENSOR_PIN, ADC_11db); // range ~0-3.3V
+
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0);
@@ -48,6 +51,8 @@ void loop() {
 
   // Konversi ke voltase ESP32
   float volt = (float)avgval * 3.3 / 4095.0 / 6;
+  Serial.print("Voltage:");
+  Serial.println(volt);
   ph_act = -5.70 * volt + calibration_value;
 
   // Tampilkan di Serial Monitor
