@@ -55,7 +55,7 @@ DFRobot_EC tds;
 unsigned long prevMillis = 0;
 const long interval = 5000;
 
-// --- Web UI (Tidak diubah) ---
+// --- Web UI  ---
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE html><html><head>
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -124,7 +124,7 @@ setInterval(refresh,2000); refresh();
 </body></html>
 )rawliteral";
 
-// --- FUNGSI SENSOR (Tidak diubah) ---
+// --- FUNGSI SENSOR  ---
 void bacaSensorA(){
   sensors.requestTemperatures();
   tempA = sensors.getTempCByIndex(0);
@@ -140,7 +140,6 @@ void bacaSensorA(){
 void updateSensorB(float ph, float tds, float temp){ phB=ph; tdsB=tds; tempB=temp; }
 
 // --- FUNGSI-FUNGSI BARU UNTUK MERAPIKAN LCD ---
-// Helper untuk mencetak angka integer rata kanan
 void printPaddedNumber(long value, int width) {
   int numDigits = (value == 0) ? 1 : floor(log10(abs(value))) + 1;
   if (value < 0) numDigits++; 
@@ -156,7 +155,6 @@ void printPaddedNumber(float value, int width, int precision) {
 }
 
 // --- FUNGSI LCD BARU YANG SUDAH RAPI ---
-// --- FUNGSI LCD BARU YANG SUDAH DIRAPIKAN ULANG ---
 void updateLCDmain(){
   // Definisikan posisi kolom baru untuk layout yang lebih baik
   const int COL_LABEL = 0;     // Posisi awal label (Suhu, TDS, pH)
