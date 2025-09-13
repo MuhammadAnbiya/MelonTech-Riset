@@ -156,7 +156,7 @@ lcd.setCursor(0, 1);
 lcd.print("pH:");
 lcd.print(phA, 0);     // tampil 6.8
 
-lcd.print(" Mode:");
+lcd.print("Mode:");
 lcd.print(modeOtomatis ? "Auto " : "Manual");
 }
 
