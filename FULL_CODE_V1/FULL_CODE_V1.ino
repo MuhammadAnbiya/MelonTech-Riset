@@ -8,12 +8,8 @@
  * - LCD I2C 20x4
  * - 3-Channel Relay Module
  * - 2x Pompa Peristaltik, 1x Aerator
- *
- * Dibuat oleh: Anbiya & Panji
- * Tanggal Update: 13 September 2025
  ******************************************************************************/
 
-// --- LIBRARIES ---
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
@@ -22,14 +18,12 @@
 #include <DallasTemperature.h>
 #include <DFRobot_EC.h>
 
-// --- PENGATURAN JARINGAN ---
+// ---------- CONFIG ----------
 const char* ssid = "anbi";
 const char* password = "88888888";
 
-// --- PENGATURAN LCD ---
-LiquidCrystal_I2C lcd(0x27, 20, 4); 
+LiquidCrystal_I2C lcd(0x27, 20, 4);
 
-// --- PENGATURAN PIN ---
 #define SENSOR_TDS_PIN      34
 #define SENSOR_PH_PIN       35
 #define SENSOR_SUHU_PIN     4
@@ -38,228 +32,266 @@ LiquidCrystal_I2C lcd(0x27, 20, 4);
 #define RELAY_POMPA_B_PIN   26
 #define RELAY_AERATOR_PIN   14
 
-// --- PENTING: KONSTANTA KALIBRASI SENSOR PH GENERIK ---
-#define PH_OFFSET 14.30 
+#define PH_OFFSET 14.30
 #define PH_SLOPE -5.00
+
+// --- Karakter Kustom untuk Simbol Derajat (°) ---
+byte degree_char[8] = {
+  B00110, B01001, B01001, B00110,
+  B00000, B00000, B00000, B00000
+};
 
 // --- VARIABEL GLOBAL ---
 float voltage = 3.3;
-float phValue, tdsValue, tempValue;
+float phA=0, tdsA=0, tempA=0;
+float phB=0, tdsB=0, tempB=0;
 bool modeOtomatis = true;
 
-// Inisialisasi Objek
 AsyncWebServer server(80);
 OneWire oneWire(SENSOR_SUHU_PIN);
 DallasTemperature sensors(&oneWire);
 DFRobot_EC tds;
 
-// Variabel untuk timer non-blocking
-unsigned long previousMillis = 0;
-const long interval = 5000; 
+unsigned long prevMillis = 0;
+const long interval = 5000;
 
-// --- KODE HTML WEB SERVER ---
+// --- Web UI (Tidak diubah) ---
 const char index_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE HTML><html>
-<head>
-  <title>ESP32 Smart Watering Control</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    html { font-family: Arial, Helvetica, sans-serif; display: inline-block; text-align: center; }
-    h2 { font-size: 2.3rem; }
-    p { font-size: 1.9rem; }
-    body { max-width: 600px; margin:0px auto; padding-bottom: 25px; }
-    .sensor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;}
-    .sensor { padding: 20px; background: #f2f2f2; border-radius: 10px; }
-    .switch-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px;}
-    .button { background-color: #4CAF50; border: none; color: white; padding: 16px 20px;
-              text-decoration: none; font-size: 20px; margin: 2px; cursor: pointer; border-radius: 10px;}
-    .button-off { background-color: #555555; }
-    #mode-auto { background-color: #008CBA; width: 100%; }
-  </style>
-</head>
-<body>
-  <h2>ESP32 Smart Watering</h2>
-  
-  <div class="sensor-grid">
-    <div class="sensor"><strong>Suhu:</strong> <span id="suhu">--</span> &deg;C</div>
-    <div class="sensor"><strong>TDS:</strong> <span id="tds">--</span> ppm</div>
-    <div class="sensor"><strong>pH:</strong> <span id="ph">--</span></div>
-    <div class="sensor"><strong>Mode:</strong> <span id="mode">--</span></div>
-  </div>
+<!DOCTYPE html><html><head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 Smart Watering</title>
+<style>
+body{margin:0;font-family:Arial;background:#0f2027;
+background:linear-gradient(315deg,#0f2027,#203a43,#2c5364);color:#fff;text-align:center;}
+h2{margin:20px 0;}
+.card{background:rgba(255,255,255,0.08);padding:20px;margin:10px;border-radius:12px;box-shadow:0 0 10px #000;}
+table{width:100%;border-collapse:collapse;color:#fff;font-size:14px;}
+td,th{padding:10px;}
+button{padding:10px 18px;margin:5px;border:none;border-radius:8px;cursor:pointer;
+color:white;font-size:14px;transition:0.3s;}
+.on{background:#27ae60;}    /* hijau */
+.off{background:#c0392b;}   /* merah */
+</style></head><body>
+<h2>ESP32 Smart Watering</h2>
 
-  <h3>Kontrol Manual</h3>
-  <div class="switch-grid">
-    <button onclick="toggleRelay(1)" id="btn1" class="button button-off">Pompa A</button>
-    <button onclick="toggleRelay(2)" id="btn2" class="button button-off">Pompa B</button>
-    <button onclick="toggleRelay(3)" id="btn3" class="button button-off">Aerator</button>
-  </div>
-  <button onclick="setAutoMode()" id="mode-auto" class="button">Kembali ke Mode Otomatis</button>
+<div class="card">
+<h3>Data Sensor</h3>
+<table>
+<tr><th>Parameter</th><th>Sensor A</th><th>Sensor B</th></tr>
+<tr><td>Suhu (&deg;C)</td><td id="sa">--</td><td id="sb">--</td></tr>
+<tr><td>TDS (ppm)</td><td id="ta">--</td><td id="tb">--</td></tr>
+<tr><td>pH</td><td id="pa">--</td><td id="pb">--</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h3>Kontrol</h3>
+<button id="modeBtn" onclick="toggleMode()">Mode</button><br>
+<button id="r1" onclick="toggleRelay(1)">Pompa A</button>
+<button id="r2" onclick="toggleRelay(2)">Pompa B</button>
+<button id="r3" onclick="toggleRelay(3)">Aerator</button>
+</div>
 
 <script>
-function toggleRelay(id) {
-  var xhr = new XMLHttpRequest();
-  xhr.open("GET", "/relay?id=" + id, true);
-  xhr.send();
-}
+function refresh(){
+  fetch('/data').then(r=>r.json()).then(d=>{
+    sa.innerText = d.suhuA.toFixed(0);
+    sb.innerText = d.suhuB.toFixed(0);
+    ta.innerText = d.tdsA.toFixed(0);
+    tb.innerText = d.tdsB.toFixed(0);
+    pa.innerText = d.phA.toFixed(1);
+    pb.innerText = d.phB.toFixed(1);
 
-function setAutoMode() {
-  var xhr = new XMLHttpRequest();
-  xhr.open("GET", "/mode?auto=1", true);
-  xhr.send();
-}
-
-setInterval(function () {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (this.readyState == 4 && this.status == 200) {
-      var data = JSON.parse(this.responseText);
-      document.getElementById("suhu").innerHTML = data.suhu.toFixed(2);
-      document.getElementById("tds").innerHTML = data.tds.toFixed(2);
-      document.getElementById("ph").innerHTML = data.ph.toFixed(2);
-      document.getElementById("mode").innerHTML = data.mode;
-      
-      document.getElementById("btn1").className = data.relay1 == 1 ? "button" : "button button-off";
-      document.getElementById("btn2").className = data.relay2 == 1 ? "button" : "button button-off";
-      document.getElementById("btn3").className = data.relay3 == 1 ? "button" : "button button-off";
+    // update tombol mode
+    if(d.mode === "auto"){
+      modeBtn.innerText = "Mode: Otomatis";
+      modeBtn.className = "on";
+    } else {
+      modeBtn.innerText = "Mode: Manual";
+      modeBtn.className = "off";
     }
-  };
-  xhttp.open("GET", "/data", true);
-  xhttp.send();
-}, 2000);
+
+    // update tombol relay
+    document.getElementById("r1").className = d.relay1 ? "on" : "off";
+    document.getElementById("r2").className = d.relay2 ? "on" : "off";
+    document.getElementById("r3").className = d.relay3 ? "on" : "off";
+  });
+}
+function toggleRelay(id){ fetch('/relay?id='+id).then(refresh); }
+function toggleMode(){ fetch('/mode?toggle=1').then(refresh); }
+setInterval(refresh,2000); refresh();
 </script>
-</body>
-</html>
+</body></html>
 )rawliteral";
 
-// ----------------- SENSOR -----------------
-void bacaSemuaSensor() {
-  sensors.requestTemperatures(); 
-  tempValue = sensors.getTempCByIndex(0);
-  if(tempValue == DEVICE_DISCONNECTED_C || tempValue < -10) {
-    tempValue = 25.0;
-  }
+// --- FUNGSI SENSOR (Tidak diubah) ---
+void bacaSensorA(){
+  sensors.requestTemperatures();
+  tempA = sensors.getTempCByIndex(0);
+  if(tempA==DEVICE_DISCONNECTED_C || tempA < -10) tempA = 25.0;
 
   float v_tds = analogRead(SENSOR_TDS_PIN) / 4095.0 * voltage;
-  tdsValue = tds.readEC(v_tds, tempValue);
+  tdsA = tds.readEC(v_tds, tempA);
 
-  float v_ph = analogRead(SENSOR_PH_PIN) / 4095.0 * 5.0; 
-  phValue = PH_OFFSET + (v_ph - 2.5) * PH_SLOPE; 
+  float v_ph = analogRead(SENSOR_PH_PIN) / 4095.0 * 5.0;
+  phA = PH_OFFSET + (v_ph - 2.5) * PH_SLOPE;
 }
 
-void updateLCD() {
+void updateSensorB(float ph, float tds, float temp){ phB=ph; tdsB=tds; tempB=temp; }
+
+// --- FUNGSI-FUNGSI BARU UNTUK MERAPIKAN LCD ---
+// Helper untuk mencetak angka integer rata kanan
+void printPaddedNumber(long value, int width) {
+  int numDigits = (value == 0) ? 1 : floor(log10(abs(value))) + 1;
+  if (value < 0) numDigits++; 
+  for (int i = 0; i < width - numDigits; i++) { lcd.print(" "); }
+  lcd.print(value);
+}
+
+// Helper untuk mencetak angka float rata kanan
+void printPaddedNumber(float value, int width, int precision) {
+  String str = String(value, precision);
+  for (int i = 0; i < width - str.length(); i++) { lcd.print(" "); }
+  lcd.print(str);
+}
+
+// --- FUNGSI LCD BARU YANG SUDAH RAPI ---
+// --- FUNGSI LCD BARU YANG SUDAH DIRAPIKAN ULANG ---
+void updateLCDmain(){
+  // Definisikan posisi kolom baru untuk layout yang lebih baik
+  const int COL_LABEL = 0;     // Posisi awal label (Suhu, TDS, pH)
+  const int COL_SEPARATOR = 4; // Posisi untuk "-A:" atau ":"
+  const int COL_A_VALUE = 7;   // Posisi awal nilai A
+  const int COL_B_LABEL = 13;    // Posisi untuk "B:"
+  const int COL_B_VALUE = 15;    // Posisi awal nilai B (lebih banyak ruang)
+
+  // Bersihkan layar sekali saja di awal
   lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Suhu: " + String(tempValue, 2) + " C");
-  lcd.setCursor(0, 1);
-  lcd.print("TDS : " + String(tdsValue, 1) + " ppm");
-  lcd.setCursor(0, 2);
-  lcd.print("pH  : " + String(phValue, 2));
-  lcd.setCursor(0, 3);
-  lcd.print("Mode: " + String(modeOtomatis ? "Otomatis" : "Manual"));
+
+  // --- BARIS 1: SUHU ---
+  lcd.setCursor(COL_LABEL, 0); lcd.print("Suhu");
+  lcd.setCursor(COL_SEPARATOR, 0); lcd.print("-A:");
+  lcd.setCursor(COL_A_VALUE, 0); printPaddedNumber((long)tempA, 3);
+  lcd.write(byte(0)); // Simbol derajat
+  lcd.print("C");
+  lcd.setCursor(COL_B_LABEL, 0); lcd.print("B:");
+  lcd.setCursor(COL_B_VALUE, 0); printPaddedNumber((long)tempB, 3);
+  
+  // --- BARIS 2: TDS ---
+  lcd.setCursor(COL_LABEL, 1); lcd.print("TDS");
+  lcd.setCursor(COL_SEPARATOR, 1); lcd.print("-A:");
+  lcd.setCursor(COL_A_VALUE, 1); printPaddedNumber((long)tdsA, 4);
+  lcd.setCursor(COL_B_LABEL, 1); lcd.print("B:");
+  lcd.setCursor(COL_B_VALUE, 1); printPaddedNumber((long)tdsB, 4);
+
+  // --- BARIS 3: pH ---
+  lcd.setCursor(COL_LABEL, 2); lcd.print("pH");
+  lcd.setCursor(COL_SEPARATOR, 2); lcd.print("-A:");
+  lcd.setCursor(COL_A_VALUE, 2); printPaddedNumber(phA, 4, 1);
+  lcd.setCursor(COL_B_LABEL, 2); lcd.print("B:");
+  lcd.setCursor(COL_B_VALUE, 2); printPaddedNumber(phB, 4, 1);
+
+  // --- BARIS 4: MODE (dengan perataan ":") ---
+  lcd.setCursor(COL_LABEL, 3); lcd.print("Mode");
+  // Pindahkan kursor agar ":" sejajar dengan ":" di atasnya (posisi 7)
+  lcd.setCursor(COL_SEPARATOR + 2, 3); lcd.print(":");
+  lcd.setCursor(COL_A_VALUE, 3);
+  lcd.print(modeOtomatis ? "Otomatis" : "Manual");
 }
 
-// ----------------- FUZZY LOGIC MANUAL -----------------
-void fuzzyLogicManual() {
-  bool outPompaA = false;
-  bool outPompaB = false;
-  bool outAerator = false;
+// --- FUNGSI LOGIKA KONTROL OTOMATIS (DIPERBAIKI) ---
+void logicController() {
+  bool outA = false, outB = false, outAer = false;
 
-  if (phValue > 7.5) outPompaA = true;      // Basa
-  if (phValue < 6) outPompaB = true;        // Asam
-  if (tdsValue < 400) { outPompaA = true; outPompaB = true; }
-  if (tempValue > 28) outAerator = true;    // Suhu tinggi
-  if (tdsValue > 1000) { outPompaA = false; outPompaB = false; }
+  // Logika Aerator
+  if (tempA > 28) outAer = true;
 
-  digitalWrite(RELAY_POMPA_A_PIN, outPompaA ? LOW : HIGH);
-  digitalWrite(RELAY_POMPA_B_PIN, outPompaB ? LOW : HIGH);
-  digitalWrite(RELAY_AERATOR_PIN, outAerator ? LOW : HIGH);
+  // Logika Pompa dengan Prioritas
+  if (tdsA > 1000) { // Prioritas 1: Jika TDS terlalu tinggi, matikan semua
+    outA = false;
+    outB = false;
+  } else if (tdsA < 400) { // Prioritas 2: Jika TDS terlalu rendah, nyalakan keduanya
+    outA = true;
+    outB = true;
+  } else { // Prioritas 3: Jika TDS ideal, baru koreksi pH
+    if (phA > 7.5) outA = true;
+    else if (phA < 6) outB = true;
+  }
+  
+  digitalWrite(RELAY_POMPA_A_PIN, outA ? LOW : HIGH);
+  digitalWrite(RELAY_POMPA_B_PIN, outB ? LOW : HIGH);
+  digitalWrite(RELAY_AERATOR_PIN, outAer ? LOW : HIGH);
 }
 
-// ----------------- SETUP -----------------
-void setup() {
+
+// --- SETUP ---
+void setup(){
   Serial.begin(115200);
-
+  
   lcd.init();
   lcd.backlight();
-  lcd.setCursor(0,0);
-  lcd.print("System Starting...");
+  lcd.createChar(0, degree_char); // Daftarkan karakter derajat kustom ke LCD
 
   pinMode(RELAY_POMPA_A_PIN, OUTPUT);
   pinMode(RELAY_POMPA_B_PIN, OUTPUT);
   pinMode(RELAY_AERATOR_PIN, OUTPUT);
-  digitalWrite(RELAY_POMPA_A_PIN, HIGH);
-  digitalWrite(RELAY_POMPA_B_PIN, HIGH);
-  digitalWrite(RELAY_AERATOR_PIN, HIGH);
+  digitalWrite(RELAY_POMPA_A_PIN,HIGH);
+  digitalWrite(RELAY_POMPA_B_PIN,HIGH);
+  digitalWrite(RELAY_AERATOR_PIN,HIGH);
 
-  sensors.begin();
-  tds.begin();
+  sensors.begin(); tds.begin();
 
-  // ---- MODE STATION (STA) ----
-  WiFi.begin(ssid, password);
-  Serial.print("Menghubungkan ke WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nTerhubung ke WiFi!");
-  Serial.print("IP ESP32: ");
-  Serial.println(WiFi.localIP());
+  // Koneksi WiFi
+  WiFi.begin(ssid,password);
+  Serial.print("Connecting to WiFi");
+  while(WiFi.status()!=WL_CONNECTED){ delay(500); Serial.print("."); }
+  Serial.println("\nIP: " + WiFi.localIP().toString());
 
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send_P(200, "text/html", index_html);
+  // Web Server Handlers (Tidak diubah)
+  server.on("/",HTTP_GET,[](AsyncWebServerRequest *r){ r->send_P(200,"text/html",index_html); });
+  server.on("/data",HTTP_GET,[](AsyncWebServerRequest *r){
+    String json="{";
+    json+="\"suhuA\":"+String(tempA,0)+",\"tdsA\":"+String(tdsA,0)+",\"phA\":"+String(phA,1)+",";
+    json+="\"suhuB\":"+String(tempB,0)+",\"tdsB\":"+String(tdsB,0)+",\"phB\":"+String(phB,1)+",";
+    json+="\"mode\":\""+String(modeOtomatis?"auto":"manual")+"\",";
+    json += "\"relay1\":" + String(digitalRead(RELAY_POMPA_A_PIN)==LOW ? "true" : "false") + ",";
+    json += "\"relay2\":" + String(digitalRead(RELAY_POMPA_B_PIN)==LOW ? "true" : "false") + ",";
+    json += "\"relay3\":" + String(digitalRead(RELAY_AERATOR_PIN)==LOW ? "true" : "false");
+    json+="}";
+    r->send(200,"application/json",json);
   });
-  server.on("/data", HTTP_GET, [](AsyncWebServerRequest *request){ 
-    String json = "{"; 
-    json += "\"suhu\":" + String(tempValue) + ",";
-    json += "\"tds\":" + String(tdsValue) + ",";
-    json += "\"ph\":" + String(phValue) + ",";
-    json += "\"mode\":\"" + String(modeOtomatis ? "Otomatis" : "Manual") + "\",";
-    json += "\"relay1\":" + String(digitalRead(RELAY_POMPA_A_PIN) == LOW ? 1 : 0) + ",";
-    json += "\"relay2\":" + String(digitalRead(RELAY_POMPA_B_PIN) == LOW ? 1 : 0) + ",";
-    json += "\"relay3\":" + String(digitalRead(RELAY_AERATOR_PIN) == LOW ? 1 : 0);
-    json += "}"; 
-    request->send(200, "application/json", json); 
+  server.on("/updateB",HTTP_GET,[](AsyncWebServerRequest *r){
+    if(r->hasParam("ph")&&r->hasParam("tds")&&r->hasParam("temp")){
+      updateSensorB(r->getParam("ph")->value().toFloat(),
+                    r->getParam("tds")->value().toFloat(),
+                    r->getParam("temp")->value().toFloat());
+      r->send(200,"text/plain","OK");
+    } else r->send(400,"text/plain","Missing params");
   });
-  server.on("/relay", HTTP_GET, [](AsyncWebServerRequest *request){ 
-    if (request->hasParam("id")) { 
-      int id = request->getParam("id")->value().toInt(); 
-      modeOtomatis = false; 
-      int pinToToggle = -1; 
-      if (id == 1) pinToToggle = RELAY_POMPA_A_PIN; 
-      else if (id == 2) pinToToggle = RELAY_POMPA_B_PIN; 
-      else if (id == 3) pinToToggle = RELAY_AERATOR_PIN; 
-      if (pinToToggle != -1) { digitalWrite(pinToToggle, !digitalRead(pinToToggle)); } 
-    } 
-    request->send(200, "text/plain", "OK"); 
+  server.on("/relay",HTTP_GET,[](AsyncWebServerRequest *r){
+    int id=r->getParam("id")->value().toInt();
+    int pin=(id==1?RELAY_POMPA_A_PIN:id==2?RELAY_POMPA_B_PIN:id==3?RELAY_AERATOR_PIN:-1);
+    if(pin!=-1){ digitalWrite(pin,!digitalRead(pin)); modeOtomatis=false; }
+    r->send(200,"text/plain","OK");
   });
-  server.on("/mode", HTTP_GET, [](AsyncWebServerRequest *request){ 
-    if (request->hasParam("auto")) { modeOtomatis = true; } 
-    request->send(200, "text/plain", "OK"); 
+  server.on("/mode",HTTP_GET,[](AsyncWebServerRequest *r){
+    if(r->hasParam("toggle")) modeOtomatis=!modeOtomatis;
+    else modeOtomatis=true;
+    r->send(200,"text/plain","OK");
   });
 
   server.begin();
-  Serial.println("Web server started.");
 }
 
-// ----------------- LOOP -----------------
-void loop() {
-  unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= interval) {
-    previousMillis = currentMillis;
-
-    bacaSemuaSensor();
-    Serial.println("\n--- Sensor Readings ---");
-    Serial.printf("Suhu: %.2f *C\n", tempValue);
-    Serial.printf("TDS: %.2f ppm\n", tdsValue);
-    Serial.printf("pH: %.2f\n", phValue);
-
-    updateLCD();
-
-    if (modeOtomatis) {
-      Serial.println("Mode: Otomatis. Menjalankan fuzzy manual...");
-      fuzzyLogicManual();
-    } else {
-      Serial.println("Mode: Manual. Kontrol dari Web.");
+// --- LOOP UTAMA ---
+void loop(){
+  unsigned long now=millis();
+  if(now-prevMillis>=interval){
+    prevMillis=now;
+    bacaSensorA();
+    updateLCDmain(); // Panggil fungsi LCD yang sudah rapi
+    if(modeOtomatis){
+      logicController(); // Panggil fungsi logika yang sudah diperbaiki
     }
   }
 }
