@@ -1,7 +1,5 @@
 /******************************************************************************
  * Proyek: Smart Watering Melon Tech Nusa Putra Riset BIMA
- * Deskripsi: Versi upgrade dengan Web Server Access Point untuk kontrol manual
- * dan monitoring, serta display LCD 20x4. Tanpa library eFLL, fuzzy logic manual.
  * Hardware:
  * - ESP32 DevKit V1 (30-pin)
  * - Sensor pH Generik (Analog)
@@ -15,7 +13,7 @@
  * Tanggal Update: 13 September 2025
  ******************************************************************************/
 
-// --- PUSTAKA (LIBRARIES) ---
+// --- LIBRARIES ---
 #include <Arduino.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
@@ -24,7 +22,7 @@
 #include <DallasTemperature.h>
 #include <DFRobot_EC.h>
 
-// --- PENGATURAN JARINGAN ACCESS POINT ---
+// --- PENGATURAN JARINGAN ---
 const char* ssid = "anbi";
 const char* password = "88888888";
 
@@ -59,7 +57,7 @@ DFRobot_EC tds;
 unsigned long previousMillis = 0;
 const long interval = 5000; 
 
-// --- KODE HTML WEB SERVER (TIDAK DIUBAH) ---
+// --- KODE HTML WEB SERVER ---
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE HTML><html>
 <head>
@@ -166,22 +164,12 @@ void fuzzyLogicManual() {
   bool outPompaB = false;
   bool outAerator = false;
 
-  // Rule 1: JIKA pH Basa (>7.5) MAKA Pompa A Nyala
-  if (phValue > 7.5) outPompaA = true;
-
-  // Rule 2: JIKA pH Asam (<6) MAKA Pompa B Nyala
-  if (phValue < 6) outPompaB = true;
-
-  // Rule 3: JIKA TDS Rendah (<400) MAKA Pompa A & B Nyala
+  if (phValue > 7.5) outPompaA = true;      // Basa
+  if (phValue < 6) outPompaB = true;        // Asam
   if (tdsValue < 400) { outPompaA = true; outPompaB = true; }
-
-  // Rule 4: JIKA Suhu Panas (>28) MAKA Aerator Nyala
-  if (tempValue > 28) outAerator = true;
-
-  // Rule 5: JIKA TDS Tinggi (>1000) MAKA Pompa A & B Mati
+  if (tempValue > 28) outAerator = true;    // Suhu tinggi
   if (tdsValue > 1000) { outPompaA = false; outPompaB = false; }
 
-  // Eksekusi relay
   digitalWrite(RELAY_POMPA_A_PIN, outPompaA ? LOW : HIGH);
   digitalWrite(RELAY_POMPA_B_PIN, outPompaB ? LOW : HIGH);
   digitalWrite(RELAY_AERATOR_PIN, outAerator ? LOW : HIGH);
@@ -206,9 +194,16 @@ void setup() {
   sensors.begin();
   tds.begin();
 
-  WiFi.softAP(ssid, password);
-  Serial.print("Access Point IP address: ");
-  Serial.println(WiFi.softAPIP());
+  // ---- MODE STATION (STA) ----
+  WiFi.begin(ssid, password);
+  Serial.print("Menghubungkan ke WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nTerhubung ke WiFi!");
+  Serial.print("IP ESP32: ");
+  Serial.println(WiFi.localIP());
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send_P(200, "text/html", index_html);
