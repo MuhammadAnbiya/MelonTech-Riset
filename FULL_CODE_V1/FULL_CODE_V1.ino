@@ -5,7 +5,7 @@
  * - Sensor pH Generik (Analog)
  * - DFRobot Analog TDS Sensor
  * - DFRobot Waterproof DS18B20 Temperature Sensor
- * - LCD I2C 20x4
+ * - LCD I2C 16x2
  * - 3-Channel Relay Module
  * - 2x Pompa Peristaltik, 1x Aerator
  ******************************************************************************/
@@ -22,7 +22,7 @@
 const char* ssid = "anbi";
 const char* password = "88888888";
 
-LiquidCrystal_I2C lcd(0x27, 20, 4);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 #define SENSOR_TDS_PIN      34
 #define SENSOR_PH_PIN       35
@@ -102,7 +102,6 @@ function refresh(){
     pa.innerText = d.phA.toFixed(1);
     pb.innerText = d.phB.toFixed(1);
 
-    // update tombol mode
     if(d.mode === "auto"){
       modeBtn.innerText = "Mode: Otomatis";
       modeBtn.className = "on";
@@ -111,7 +110,6 @@ function refresh(){
       modeBtn.className = "off";
     }
 
-    // update tombol relay
     document.getElementById("r1").className = d.relay1 ? "on" : "off";
     document.getElementById("r2").className = d.relay2 ? "on" : "off";
     document.getElementById("r3").className = d.relay3 ? "on" : "off";
@@ -139,79 +137,40 @@ void bacaSensorA(){
 
 void updateSensorB(float ph, float tds, float temp){ phB=ph; tdsB=tds; tempB=temp; }
 
-// --- FUNGSI-FUNGSI BARU UNTUK MERAPIKAN LCD ---
-void printPaddedNumber(long value, int width) {
-  int numDigits = (value == 0) ? 1 : floor(log10(abs(value))) + 1;
-  if (value < 0) numDigits++; 
-  for (int i = 0; i < width - numDigits; i++) { lcd.print(" "); }
-  lcd.print(value);
-}
-
-// Helper untuk mencetak angka float rata kanan
-void printPaddedNumber(float value, int width, int precision) {
-  String str = String(value, precision);
-  for (int i = 0; i < width - str.length(); i++) { lcd.print(" "); }
-  lcd.print(str);
-}
-
-// --- FUNGSI LCD BARU YANG SUDAH RAPI ---
-void updateLCDmain(){
-  // Definisikan posisi kolom baru untuk layout yang lebih baik
-  const int COL_LABEL = 0;     // Posisi awal label (Suhu, TDS, pH)
-  const int COL_SEPARATOR = 4; // Posisi untuk "-A:" atau ":"
-  const int COL_A_VALUE = 7;   // Posisi awal nilai A
-  const int COL_B_LABEL = 13;    // Posisi untuk "B:"
-  const int COL_B_VALUE = 15;    // Posisi awal nilai B (lebih banyak ruang)
-
-  // Bersihkan layar sekali saja di awal
+// --- FUNGSI LCD UNTUK 16x2 ---
+void updateLCD16x2() {
   lcd.clear();
 
-  // --- BARIS 1: SUHU ---
-  lcd.setCursor(COL_LABEL, 0); lcd.print("Suhu");
-  lcd.setCursor(COL_SEPARATOR, 0); lcd.print("-A:");
-  lcd.setCursor(COL_A_VALUE, 0); printPaddedNumber((long)tempA, 3);
-  lcd.write(byte(0)); // Simbol derajat
-  lcd.print("C");
-  lcd.setCursor(COL_B_LABEL, 0); lcd.print("B:");
-  lcd.setCursor(COL_B_VALUE, 0); printPaddedNumber((long)tempB, 3);
-  
-  // --- BARIS 2: TDS ---
-  lcd.setCursor(COL_LABEL, 1); lcd.print("TDS");
-  lcd.setCursor(COL_SEPARATOR, 1); lcd.print("-A:");
-  lcd.setCursor(COL_A_VALUE, 1); printPaddedNumber((long)tdsA, 4);
-  lcd.setCursor(COL_B_LABEL, 1); lcd.print("B:");
-  lcd.setCursor(COL_B_VALUE, 1); printPaddedNumber((long)tdsB, 4);
 
-  // --- BARIS 3: pH ---
-  lcd.setCursor(COL_LABEL, 2); lcd.print("pH");
-  lcd.setCursor(COL_SEPARATOR, 2); lcd.print("-A:");
-  lcd.setCursor(COL_A_VALUE, 2); printPaddedNumber(phA, 4, 1);
-  lcd.setCursor(COL_B_LABEL, 2); lcd.print("B:");
-  lcd.setCursor(COL_B_VALUE, 2); printPaddedNumber(phB, 4, 1);
+lcd.setCursor(0, 0);
+lcd.print("S:");
+lcd.print(tempA, 0);   // tampil 26
+lcd.write(223);        // simbol derajat (°)
+lcd.print("C ");
 
-  // --- BARIS 4: MODE (dengan perataan ":") ---
-  lcd.setCursor(COL_LABEL, 3); lcd.print("Mode");
-  // Pindahkan kursor agar ":" sejajar dengan ":" di atasnya (posisi 7)
-  lcd.setCursor(COL_SEPARATOR + 2, 3); lcd.print(":");
-  lcd.setCursor(COL_A_VALUE, 3);
-  lcd.print(modeOtomatis ? "Otomatis" : "Manual");
+lcd.print("OD:");
+lcd.print(tdsA, 0);    // tampil 100
+lcd.print("ppm");
+
+lcd.setCursor(0, 1);
+lcd.print("pH:");
+lcd.print(phA, 0);     // tampil 6.8
+
+lcd.print(" Mode:");
+lcd.print(modeOtomatis ? "Auto " : "Manual");
 }
 
-// --- FUNGSI LOGIKA KONTROL OTOMATIS (DIPERBAIKI) ---
+// --- FUNGSI LOGIKA KONTROL OTOMATIS ---
 void logicController() {
   bool outA = false, outB = false, outAer = false;
 
-  // Logika Aerator
   if (tempA > 28) outAer = true;
 
-  // Logika Pompa dengan Prioritas
-  if (tdsA > 1000) { // Prioritas 1: Jika TDS terlalu tinggi, matikan semua
-    outA = false;
-    outB = false;
-  } else if (tdsA < 400) { // Prioritas 2: Jika TDS terlalu rendah, nyalakan keduanya
-    outA = true;
-    outB = true;
-  } else { // Prioritas 3: Jika TDS ideal, baru koreksi pH
+  if (tdsA > 1000) {
+    outA = false; outB = false;
+  } else if (tdsA < 400) {
+    outA = true; outB = true;
+  } else {
     if (phA > 7.5) outA = true;
     else if (phA < 6) outB = true;
   }
@@ -221,14 +180,13 @@ void logicController() {
   digitalWrite(RELAY_AERATOR_PIN, outAer ? LOW : HIGH);
 }
 
-
 // --- SETUP ---
 void setup(){
   Serial.begin(115200);
   
   lcd.init();
   lcd.backlight();
-  lcd.createChar(0, degree_char); // Daftarkan karakter derajat kustom ke LCD
+  lcd.createChar(0, degree_char);
 
   pinMode(RELAY_POMPA_A_PIN, OUTPUT);
   pinMode(RELAY_POMPA_B_PIN, OUTPUT);
@@ -239,13 +197,11 @@ void setup(){
 
   sensors.begin(); tds.begin();
 
-  // Koneksi WiFi
   WiFi.begin(ssid,password);
   Serial.print("Connecting to WiFi");
   while(WiFi.status()!=WL_CONNECTED){ delay(500); Serial.print("."); }
   Serial.println("\nIP: " + WiFi.localIP().toString());
 
-  // Web Server Handlers (Tidak diubah)
   server.on("/",HTTP_GET,[](AsyncWebServerRequest *r){ r->send_P(200,"text/html",index_html); });
   server.on("/data",HTTP_GET,[](AsyncWebServerRequest *r){
     String json="{";
@@ -287,9 +243,9 @@ void loop(){
   if(now-prevMillis>=interval){
     prevMillis=now;
     bacaSensorA();
-    updateLCDmain(); // Panggil fungsi LCD yang sudah rapi
+    updateLCD16x2();
     if(modeOtomatis){
-      logicController(); // Panggil fungsi logika yang sudah diperbaiki
+      logicController();
     }
   }
 }
