@@ -10,7 +10,7 @@
 GravityTDS gravityTds;
 
 float temperature = 25, tdsValue, tdsCalibrated;
-const float slope = (1.77 + 1.693)/2;
+const float slope = (1.6 + 1.5) / 2;
 // const float slopeA = 1.782;
 // const float slopeB = 1.661;
 // const float slopeC = 1.209;
