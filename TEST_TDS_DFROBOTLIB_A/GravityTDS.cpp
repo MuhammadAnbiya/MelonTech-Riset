@@ -24,7 +24,7 @@
 
 GravityTDS::GravityTDS()
 {
-    this->pin = 35;
+    this->pin = 34;
     this->temperature = 25.0;
     this->aref = 3.3;
     this->adcRange = 4096.0;
@@ -181,7 +181,7 @@ void GravityTDS::ecCalibration(byte mode)
          // Serial.print("  ecvalue:");
          // Serial.println(ecValue);
           KValueTemp = rawECsolution/(133.42*voltage*voltage*voltage - 255.86*voltage*voltage + 857.39*voltage);  //calibrate in the  buffer solution, such as 707ppm(1413us/cm)@25^c
-          if((rawECsolution>0) && (rawECsolution<2000) && (KValueTemp>0.25) && (KValueTemp<4.0))
+          if((rawECsolution>0) && (rawECsolution<4000) && (KValueTemp>0.25) && (KValueTemp<4.0))
           {
               Serial.println();
               Serial.print(F(">>>Confrim Successful,K:"));

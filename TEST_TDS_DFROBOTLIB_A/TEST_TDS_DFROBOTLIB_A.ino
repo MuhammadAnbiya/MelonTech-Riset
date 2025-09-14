@@ -1,59 +1,76 @@
-// Kalibrasi dari hasil library DF Robot yang di modifikasi
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
-#include <EEPROM.h>
-#include "GravityTDS.h"
+// ---------- PENGATURAN PIN SENSOR ----------
+#define TdsSensorPin 34
+#define TempSensorPin 4
 
-#define TdsSensorPin 35
+// ======================================================================
+// --- DATA KALIBRASI ASLI ANDA TELAH DIMASUKKAN DI SINI ---
+// ======================================================================
+// Titik 1: Air dengan TDS Rendah
+const float voltage_clean = 0.24; // Hasil ukur Anda untuk 228 ppm
+const float ppm_clean     = 228.0;
 
-#define EEPROM_SIZE 512
+// Titik 2: Larutan Standar Sedang
+const float voltage_mid   = 1.41; // Hasil ukur Anda untuk 869 ppm
+const float ppm_mid       = 869.0;
 
-GravityTDS gravityTds;
+// Titik 3: Larutan Standar Tinggi
+const float voltage_high  = 2.03; // Hasil ukur Anda untuk 1369 ppm
+const float ppm_high      = 1369.0;
+// ======================================================================
 
-float temperature = 25, tdsValue, tdsCalibrated;
-const float slope = (1.6 + 1.5) / 2;
-// const float slopeA = 1.782;
-// const float slopeB = 1.661;
-// const float slopeC = 1.209;
-const float offset = 0.0;
+// Inisialisasi Sensor Suhu
+OneWire oneWire(TempSensorPin);
+DallasTemperature sensors(&oneWire);
 
-float readTDS() {
-  float sum = 0;
-  const int samples = 10;
-  for (int i = 0; i < samples; i++) {
-    gravityTds.update();
-    sum += gravityTds.getTdsValue();
-    delay(50);
+void setup() {
+  Serial.begin(115200);
+  sensors.begin(); // Mulai sensor suhu
+  Serial.println("Sistem Pengukuran TDS Terkalibrasi Siap.");
+}
+
+void loop() {
+  // 1. Baca suhu air
+  sensors.requestTemperatures(); 
+  float temperature = sensors.getTempCByIndex(0);
+
+  // Pencegahan jika sensor suhu error, gunakan nilai standar 25°C
+  if(temperature == DEVICE_DISCONNECTED_C || temperature < -5) {
+    Serial.println("Peringatan: Gagal membaca suhu, menggunakan nilai default 25 C");
+    temperature = 25.0;
   }
-  return sum / samples;
-}
+  
+  // 2. Baca nilai tegangan dari sensor TDS
+  int rawValue = analogRead(TdsSensorPin);
+  float measuredVoltage = rawValue / 4095.0 * 3.3;
 
-void setup()
-{
-    Serial.begin(115200);
-    
-    EEPROM.begin(EEPROM_SIZE);  //Initialize EEPROM
-    
-    gravityTds.setPin(TdsSensorPin);
-    gravityTds.setAref(3.3);  //reference voltage on ADC, default 5.0V on Arduino UNO
-    gravityTds.setAdcRange(4096);  //1024 for 10bit ADC;4096 for 12bit ADC
-    gravityTds.begin();  //initialization
-    
-}
+  float tdsValue = 0;
 
-void loop()
-{
-    tdsValue = readTDS();
-    //temperature = readTemperature();  //add your temperature sensor and read it
-    gravityTds.setTemperature(temperature);  // set the temperature and execute temperature compensation
-    gravityTds.update();  //sample and calculate
-    tdsValue = gravityTds.getTdsValue();  // then get the value
-    Serial.print("slope: ");
-    Serial.println(slope);
-    tdsCalibrated = (tdsValue * slope ) + offset;
-    Serial.print("TDS Raw: ");
-    Serial.print(tdsValue);
-    Serial.print(" ppm | TDS Kalibrasi: ");
-    Serial.print(tdsCalibrated);
-    Serial.println(" ppm");
-    delay(1000);
+  // 3. Logika Pemetaan Cerdas dengan 3 Titik Kalibrasi
+  if (measuredVoltage <= voltage_mid) {
+    // Jika tegangan berada di RENTANG RENDAH, gunakan kalibrasi antara titik 'clean' dan 'mid'
+    tdsValue = map(measuredVoltage * 1000, voltage_clean * 1000, voltage_mid * 1000, ppm_clean, ppm_mid);
+  } else {
+    // Jika tegangan berada di RENTANG TINGGI, gunakan kalibrasi antara titik 'mid' dan 'high'
+    tdsValue = map(measuredVoltage * 1000, voltage_mid * 1000, voltage_high * 1000, ppm_mid, ppm_high);
+  }
+  
+  // 4. Pastikan nilai tidak menjadi negatif (jika tegangan sedikit di bawah titik terendah)
+  tdsValue = constrain(tdsValue, 0, 5000); // Batasi nilai TDS antara 0 dan 5000 ppm
+
+  // 5. Lakukan kompensasi suhu untuk akurasi tertinggi
+  float compensatedTds = tdsValue / (1.0 + 0.02 * (temperature - 25.0));
+
+  // 6. Tampilkan semua hasilnya di Serial Monitor
+  Serial.print("Suhu: ");
+  Serial.print(temperature, 1);
+  Serial.print(" C | Tegangan TDS: ");
+  Serial.print(measuredVoltage, 2);
+  Serial.print(" V | TDS Final Terkompensasi: ");
+  Serial.print(compensatedTds, 0); // Tampilkan hasil akhir tanpa desimal
+  Serial.println(" ppm");
+
+  delay(2000); // Jeda 2 detik antar pengukuran
 }
