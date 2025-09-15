@@ -2,7 +2,7 @@
 #include <DallasTemperature.h>
 
 // ---------- PENGATURAN PIN SENSOR ----------
-#define TdsSensorPin 34
+#define TdsSensorPin 35
 #define TempSensorPin 4
 
 // ======================================================================

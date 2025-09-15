@@ -51,6 +51,9 @@ void loop() {
   ph_act = -5.70 * volt + calibration_value;
 
   // Tampilkan di Serial Monitor
+  Serial.print("Voltage: ");
+  Serial.println(volt);
+
   Serial.print("pH Value: ");
   Serial.println(ph_act);
 
