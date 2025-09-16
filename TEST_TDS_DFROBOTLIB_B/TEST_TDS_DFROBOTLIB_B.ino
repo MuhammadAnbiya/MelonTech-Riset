@@ -22,16 +22,31 @@
      exit -> save the parameters and exit the calibration mode
  ****************************************************/
 
+
+#include <Arduino.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <Wire.h>
+
+// Pin sensor
 #include <EEPROM.h>
 #include "GravityTDS.h"
 
+#define PIN_TEMP 4
 #define TdsSensorPin 35
 GravityTDS gravityTds;
+// LCD I2C
+
+// Sensor suhu
+OneWire oneWire(PIN_TEMP);
+DallasTemperature sensors(&oneWire);
 
 float temperature = 25,tdsValue = 0;
 
 void setup()
 {
+    sensors.requestTemperatures();
+    temperature = sensors.getTempCByIndex(0);
     Serial.begin(115200);
     gravityTds.setPin(TdsSensorPin);
     gravityTds.setAref(5.0);  //reference voltage on ADC, default 5.0V on Arduino UNO
@@ -41,6 +56,9 @@ void setup()
 
 void loop()
 {
+    if (temperature == DEVICE_DISCONNECTED_C || temperature < -10) {
+      temperature = 25.0; // fallback
+    }
     //temperature = readTemperature();  //add your temperature sensor and read it
     gravityTds.setTemperature(temperature);  // set the temperature and execute temperature compensation
     gravityTds.update();  //sample and calculate 
@@ -48,4 +66,5 @@ void loop()
     Serial.print(tdsValue,0);
     Serial.println("ppm");
     delay(1000);
+
 }

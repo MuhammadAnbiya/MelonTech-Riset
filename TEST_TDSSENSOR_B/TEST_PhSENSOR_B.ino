@@ -9,16 +9,16 @@
 // --- DATA KALIBRASI ASLI ANDA TELAH DIMASUKKAN DI SINI ---
 // ======================================================================
 // Titik 1: Air dengan TDS Rendah
-const float voltage_clean = 0.24; // Hasil ukur Anda untuk 228 ppm
-const float ppm_clean     = 228.0;
+const float voltage_clean = 0.35; // Hasil ukur Anda untuk 228 ppm
+const float ppm_clean     = 251.0; // err: 14
 
 // Titik 2: Larutan Standar Sedang
-const float voltage_mid   = 1.41; // Hasil ukur Anda untuk 869 ppm
-const float ppm_mid       = 869.0;
+const float voltage_mid   = 1.61; // Hasil ukur Anda untuk 869 ppm
+const float ppm_mid       = 870.0; // err: 49
 
 // Titik 3: Larutan Standar Tinggi
-const float voltage_high  = 2.03; // Hasil ukur Anda untuk 1369 ppm
-const float ppm_high      = 1369.0;
+const float voltage_high  = 2.25; // Hasil ukur Anda untuk 1369 ppm
+const float ppm_high      = 1370.0; // err: 86
 // ======================================================================
 
 // Inisialisasi Sensor Suhu

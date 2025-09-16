@@ -1,4 +1,3 @@
-// ESP32 B (Client) - baca sensor B, tampil di LCD16x2, kirim ke ESP32 A
 #include <Arduino.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -7,55 +6,81 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <EEPROM.h>
-#include "GravityTDS.h"
 
-// ---------- CONFIG ----------
-const char* ssid = "anbi";
+// ---------- CONFIG WIFI ----------
+const char* ssid     = "anbi";
 const char* password = "88888888";
 const char* serverIP = "10.104.81.97"; // GANTI dengan IP ESP32 A
 
+// ---------- LCD ----------
 LiquidCrystal_I2C lcd(0x27, 16, 2); // LCD 16x2 I2C
 
-// Pins sensor B
-#define SENSOR_TDS_PIN 35
-#define SENSOR_PH_PIN  34
-#define SENSOR_SUHU_PIN 4   // ganti ke pin GPIO yang support OneWire (jangan 0)
+// ---------- PIN SENSOR ----------
+#define SENSOR_TDS_PIN   35
+#define SENSOR_PH_PIN    34
+#define SENSOR_SUHU_PIN   4   // ganti ke pin GPIO yang support OneWire
 
-// EEPROM
+// ---------- EEPROM ----------
 #define EEPROM_SIZE 512
 
+// ---------- SENSOR SUHU ----------
 OneWire oneWire(SENSOR_SUHU_PIN);
 DallasTemperature sensors(&oneWire);
 
-GravityTDS gravityTds;
+// ======================================================================
+// --- DATA KALIBRASI TDS (3 TITIK) ---
+// ======================================================================
+// Titik 1: Air dengan TDS Rendah
+const float voltage_clean = 0.24;  // Hasil ukur Anda untuk 228 ppm
+const float ppm_clean     = 228.0;
 
-float phB=0, tdsB=0, tempB=0;
+// Titik 2: Larutan Standar Sedang
+const float voltage_mid   = 1.41;  // Hasil ukur Anda untuk 869 ppm
+const float ppm_mid       = 869.0;
 
-// PH calibration (atur sesuai hasil kalibrasi nyata)
+// Titik 3: Larutan Standar Tinggi
+const float voltage_high  = 2.03;  // Hasil ukur Anda untuk 1369 ppm
+const float ppm_high      = 1369.0;
+// ======================================================================
+
+// ---------- VARIABEL ----------
+float phB = 0, tdsB = 0, tempB = 0;
+
+// ---------- PH calibration (atur sesuai hasil kalibrasi nyata) ----------
 #define PH_OFFSET 7.0
 #define PH_SLOPE  0.18
 
-// Faktor kalibrasi TDS
-const float slope = 1.66;   // bisa disesuaikan
-const float offset = 0.0;
-
+// ---------- Fungsi Baca Sensor ----------
 void bacaSensorB(){
   // --- Suhu ---
   sensors.requestTemperatures();
   tempB = sensors.getTempCByIndex(0);
-  if(tempB==DEVICE_DISCONNECTED_C || tempB < -10) tempB = 25.0;
+  if(tempB == DEVICE_DISCONNECTED_C || tempB < -10) tempB = 25.0;
 
   // --- TDS ---
-  gravityTds.setTemperature(tempB); // kompensasi suhu
-  gravityTds.update();              // refresh data TDS
-  float tdsRaw = gravityTds.getTdsValue();
-  tdsB = (tdsRaw * slope) + offset;
+  int rawValue = analogRead(SENSOR_TDS_PIN);
+  float measuredVoltage = rawValue / 4095.0 * 3.3;
+  float tdsValue = 0;
+
+  // Mapping 3 titik
+  if (measuredVoltage <= voltage_mid) {
+    tdsValue = map(measuredVoltage * 1000, voltage_clean * 1000, voltage_mid * 1000, ppm_clean, ppm_mid);
+  } else {
+    tdsValue = map(measuredVoltage * 1000, voltage_mid * 1000, voltage_high * 1000, ppm_mid, ppm_high);
+  }
+
+  // Batasi nilai
+  tdsValue = constrain(tdsValue, 0, 5000);
+
+  // Kompensasi suhu
+  tdsB = tdsValue / (1.0 + 0.02 * (tempB - 25.0));
 
   // --- pH ---
   float v_ph = (analogRead(SENSOR_PH_PIN) / 4095.0) * 3.3;
   phB = PH_OFFSET + ((2.366 - v_ph) / PH_SLOPE);
 }
 
+// ---------- Fungsi Kirim ke Server ----------
 void kirimKeServer(){
   if(WiFi.status() != WL_CONNECTED) return;
   HTTPClient http;
@@ -71,16 +96,12 @@ void kirimKeServer(){
   http.end();
 }
 
+// ---------- SETUP ----------
 void setup(){
   Serial.begin(115200);
   Wire.begin(21,22);
 
   EEPROM.begin(EEPROM_SIZE);
-
-  gravityTds.setPin(SENSOR_TDS_PIN);
-  gravityTds.setAref(3.3);      // reference voltage pada ESP32
-  gravityTds.setAdcRange(4096); // ADC ESP32 12bit = 0-4095
-  gravityTds.begin();           // inisialisasi TDS
 
   lcd.init(); 
   lcd.backlight();
@@ -100,13 +121,14 @@ void setup(){
     Serial.println("\nWiFi failed");
 }
 
+// ---------- LOOP ----------
 void loop(){
   bacaSensorB();
 
   // tampil di LCD 16x2
   lcd.clear();
   lcd.setCursor(0,0);
-  lcd.printf("T:%.1fC TDS:%dppm", tempB, (int)tdsB);
+  lcd.printf("T:%.1fC TDS:%d", tempB, (int)tdsB);
   lcd.setCursor(0,1);
   lcd.printf("pH:%.2f", phB);
 
