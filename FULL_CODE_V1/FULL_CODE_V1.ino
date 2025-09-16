@@ -1,6 +1,7 @@
 /******************************************************************************
  * Proyek: Smart Watering Melon Tech Nusa Putra Riset BIMA
- * Versi: Final - Dengan Kalibrasi TDS Akurasi Tinggi
+ * Versi: Final - Dengan Kalibrasi TDS Akurasi Tinggi + Kalibrasi pH EEPROM +
+ * Fuzzy Sugeno Controller
  ******************************************************************************/
 
 #include <Arduino.h>
@@ -10,6 +11,7 @@
 #include <LiquidCrystal_I2C.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <EEPROM.h>
 
 // ---------- KONFIGURASI PENTING ----------
 const char* ssid = "anbi";
@@ -19,8 +21,7 @@ const char* password = "88888888";
 const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbyDTbuSFk0GOylphGYnyH77oPurvq0hG1Nu5ydcPEyouZ5aDKhGN8Sg8kFctRgTV7Gyfg/exec";
 
 // ======================================================================
-// --- DATA KALIBRASI TDS AKURAT ANDA ---
-// ======================================================================
+// --- DATA KALIBRASI TDS AKURAT ANDA --- (tetap seperti semula)
 const float voltage_clean = 0.24; // Tegangan untuk ~228 ppm
 const float ppm_clean     = 228.0;
 const float voltage_mid   = 1.41; // Tegangan untuk ~869 ppm
@@ -36,10 +37,12 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define SENSOR_PH_PIN       35
 #define SENSOR_SUHU_PIN     4
 
-#define RELAY_POMPA_A_PIN   25
-#define RELAY_POMPA_B_PIN   26
-#define RELAY_AERATOR_PIN   14
+#define RELAY_PERISTALTIC_1_PIN   25  // Relay biasa
+#define RELAY_PERISTALTIC_2_PIN   26  // Relay biasa
+#define RELAY_AERATOR_PIN         14  // Relay SSR (Saluran 3)
+#define RELAY_POMPA_AIR_PIN       0  // Relay SSR (Saluran 4)
 
+// default fallback (jika belum kalibrasi)
 #define PH_OFFSET 14.30
 #define PH_SLOPE -5.00
 
@@ -59,12 +62,261 @@ OneWire oneWire(SENSOR_SUHU_PIN);
 DallasTemperature sensors(&oneWire);
 
 unsigned long prevMillis = 0;
-const long interval = 15000;
+const long interval = 15000; // 15s
 
 const char index_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>🍈 Smart Melon Greenhouse</title><script src="https://cdn.jsdelivr.net/npm/chart.js"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Orbitron',monospace;background:linear-gradient(135deg,#0f2027,#203a43,#2c5364);color:#e0e0e0;overflow-x:hidden}.container{max-width:1200px;margin:0 auto;padding:20px}.header{text-align:center;margin-bottom:30px}.title{font-size:2.5rem;font-weight:900;background:linear-gradient(45deg,#4ecf87,#fff,#a8f5c6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-shadow:0 0 25px rgba(78,207,135,.5);animation:glow 2s ease-in-out infinite alternate}@keyframes glow{from{text-shadow:0 0 20px rgba(78,207,135,.4)}to{text-shadow:0 0 35px rgba(78,207,135,.7),0 0 50px rgba(78,207,135,.2)}}.grid-layout{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px}.card{background:rgba(42,63,80,.5);backdrop-filter:blur(10px);border:1px solid rgba(78,207,135,.2);border-radius:15px;padding:20px;box-shadow:0 8px 32px rgba(0,0,0,.3);transition:all .3s ease}.card:hover{transform:translateY(-5px);box-shadow:0 12px 40px rgba(0,0,0,.4),0 0 40px rgba(78,207,135,.2)}.card-title{font-size:1.3rem;color:#4ecf87;margin-bottom:20px;text-align:center}.glance-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:20px}.glance-item{text-align:center}.glance-value{font-size:2rem;font-weight:700;color:#fff}.glance-label{font-size:.8rem;color:#a8f5c6}.controls{text-align:center}.mode-indicator{padding:10px 20px;border-radius:50px;font-weight:700;font-size:1rem;margin-bottom:20px;border:2px solid;cursor:pointer;transition:all .3s ease}.mode-auto{background:#27ae60;border-color:#4ecf87;color:#fff}.mode-manual{background:#f39c12;border-color:#f1c40f;color:#fff}.relay-controls{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.relay-btn{padding:12px;border:none;border-radius:10px;font-family:'Orbitron';font-weight:700;font-size:.9rem;cursor:pointer;transition:all .3s ease}.relay-on{background:#27ae60;color:#fff}.relay-off{background:#c0392b;color:#fff}.chart-container{position:relative;height:250px;width:100%}footer{text-align:center;padding:30px 20px;margin-top:40px;border-top:1px solid rgba(78,207,135,.2)}.footer-copyright{color:rgba(224,224,224,.7);font-size:.9rem;margin-bottom:15px;letter-spacing:1px}.footer-team{color:#a8f5c6;font-size:.85rem;line-height:1.6;max-width:900px;margin:0 auto}.footer-team span{display:inline-block;margin:0 10px}</style></head><body><div class="container"><div class="header"><h1 class="title">SMARTWATERING MELON GREENHOUSE DASHBOARD</h1></div><div class="grid-layout"><div class="card"><h3 class="card-title">CONTROL PANEL A - OVERVIEW</h3><div class="glance-grid"><div class="glance-item"><div class="glance-value" id="sa_val">--</div><div class="glance-label">Suhu (°C)</div></div><div class="glance-item"><div class="glance-value" id="ta_val">--</div><div class="glance-label">TDS (ppm)</div></div><div class="glance-item"><div class="glance-value" id="pa_val">--</div><div class="glance-label">pH Level</div></div></div></div><div class="card"><h3 class="card-title">CONTROL PANEL B - OVERVIEW</h3><div class="glance-grid"><div class="glance-item"><div class="glance-value" id="sb_val">--</div><div class="glance-label">Suhu (°C)</div></div><div class="glance-item"><div class="glance-value" id="tb_val">--</div><div class="glance-label">TDS (ppm)</div></div><div class="glance-item"><div class="glance-value" id="pb_val">--</div><div class="glance-label">pH Level</div></div></div></div><div class="card controls"><h3 class="card-title">OUTPUT CONTROL</h3><div id="modeBtn" onclick="toggleMode()" class="mode-indicator">Loading...</div><div class="relay-controls"><button class="relay-btn" id="r1" onclick="toggleRelay(1)">PUMP A</button><button class="relay-btn" id="r2" onclick="toggleRelay(2)">PUMP B</button><button class="relay-btn" id="r3" onclick="toggleRelay(3)">AERATOR</button></div></div><div class="card"><h3 class="card-title">Temperature Trend (°C)</h3><div class="chart-container"><canvas id="tempChart"></canvas></div></div><div class="card"><h3 class="card-title">TDS Trend (ppm)</h3><div class="chart-container"><canvas id="tdsChart"></canvas></div></div><div class="card"><h3 class="card-title">pH Level Trend</h3><div class="chart-container"><canvas id="phChart"></canvas></div></div></div></div><footer><p class="footer-copyright">&copy; 2025 TEAM RISET BIMA</p><p class="footer-team"><span>Gina Purnama Insany</span> &bull; <span>Ivana Lucia Kharisma</span> &bull; <span>Kamdan</span> &bull; <span>Imam Sanjaya</span> &bull; <span>Muhammad Anbiya Fatah</span> &bull; <span>Panji Angkasa Putra</span></p></footer><script>const MAX_DATA_POINTS=20,chartData={labels:[],tempA:[],tempB:[],tdsA:[],tdsB:[],phA:[],phB:[]};function createChart(t,e,a){return new Chart(t,{type:"line",data:{labels:chartData.labels,datasets:a},options:{responsive:!0,maintainAspectRatio:!1,scales:{x:{ticks:{color:"#a8f5c6"},grid:{color:"rgba(78, 207, 135, 0.1)"}},y:{ticks:{color:"#a8f5c6"},grid:{color:"rgba(78, 207, 135, 0.1)"}}},plugins:{legend:{labels:{color:"#e0e0e0"}}},animation:{duration:500},elements:{line:{tension:.3}}}})}const tempChart=createChart(document.getElementById("tempChart"),"Temperature",[{label:"Sensor A",data:chartData.tempA,borderColor:"#4ecf87",backgroundColor:"rgba(78, 207, 135, 0.2)",fill:!0},{label:"Sensor B",data:chartData.tempB,borderColor:"#f39c12",backgroundColor:"rgba(243, 156, 18, 0.2)",fill:!0}]),tdsChart=createChart(document.getElementById("tdsChart"),"TDS",[{label:"Sensor A",data:chartData.tdsA,borderColor:"#3498db",backgroundColor:"rgba(52, 152, 219, 0.2)",fill:!0},{label:"Sensor B",data:chartData.tdsB,borderColor:"#9b59b6",backgroundColor:"rgba(155, 89, 182, 0.2)",fill:!0}]),phChart=createChart(document.getElementById("phChart"),"pH",[{label:"Sensor A",data:chartData.phA,borderColor:"#e74c3c",backgroundColor:"rgba(231, 76, 60, 0.2)",fill:!0},{label:"Sensor B",data:chartData.phB,borderColor:"#1abc9c",backgroundColor:"rgba(26, 188, 156, 0.2)",fill:!0}]);function updateChartData(t){const e=new Date,a=`${e.getHours().toString().padStart(2,"0")}:${e.getMinutes().toString().padStart(2,"0")}:${e.getSeconds().toString().padStart(2,"0")}`;chartData.labels.length>=MAX_DATA_POINTS&&(chartData.labels.shift(),chartData.tempA.shift(),chartData.tempB.shift(),chartData.tdsA.shift(),chartData.tdsB.shift(),chartData.phA.shift(),chartData.phB.shift()),chartData.labels.push(a),chartData.tempA.push(t.suhuA),chartData.tempB.push(t.suhuB),chartData.tdsA.push(t.tdsA),chartData.tdsB.push(t.tdsB),chartData.phA.push(t.phA),chartData.phB.push(t.phB),tempChart.update(),tdsChart.update(),phChart.update()}function refresh(){fetch("/data").then(t=>t.json()).then(t=>{document.getElementById("sa_val").innerText=t.suhuA.toFixed(1),document.getElementById("ta_val").innerText=t.tdsA.toFixed(0),document.getElementById("pa_val").innerText=t.phA.toFixed(1),document.getElementById("sb_val").innerText=t.suhuB.toFixed(1),document.getElementById("tb_val").innerText=t.tdsB.toFixed(0),document.getElementById("pb_val").innerText=t.phB.toFixed(1);const e=document.getElementById("modeBtn");"auto"===t.mode?(e.className="mode-indicator mode-auto",e.innerText="MODE: AUTOMATIC"):(e.className="mode-indicator mode-manual",e.innerText="MODE: MANUAL"),document.getElementById("r1").className=t.relay1?"relay-btn relay-on":"relay-btn relay-off",document.getElementById("r2").className=t.relay2?"relay-btn relay-on":"relay-btn relay-off",document.getElementById("r3").className=t.relay3?"relay-btn relay-on":"relay-btn relay-off",updateChartData(t)}).catch(t=>console.error("Error fetching data:",t))}function toggleRelay(t){fetch("/relay?id="+t).then(()=>setTimeout(refresh,200))}function toggleMode(){fetch("/mode?toggle=1").then(()=>setTimeout(refresh,200))}setInterval(refresh,2500),window.onload=refresh;</script></body></html>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>🍈 Smart Melon Greenhouse</title><script src="https://cdn.jsdelivr.net/npm/chart.js"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Orbitron',monospace;background:linear-gradient(135deg,#0f2027,#203a43,#2c5364);color:#e0e0e0;overflow-x:hidden}.container{max-width:1200px;margin:0 auto;padding:20px}.header{text-align:center;margin-bottom:30px}.title{font-size:2.5rem;font-weight:900;background:linear-gradient(45deg,#4ecf87,#fff,#a8f5c6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-shadow:0 0 25px rgba(78,207,135,.5);animation:glow 2s ease-in-out infinite alternate}@keyframes glow{from{text-shadow:0 0 20px rgba(78,207,135,.4)}to{text-shadow:0 0 35px rgba(78,207,135,.7),0 0 50px rgba(78,207,135,.2)}}.grid-layout{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px}.card{background:rgba(42,63,80,.5);backdrop-filter:blur(10px);border:1px solid rgba(78,207,135,.2);border-radius:15px;padding:20px;box-shadow:0 8px 32px rgba(0,0,0,.3);transition:all .3s ease}.card:hover{transform:translateY(-5px);box-shadow:0 12px 40px rgba(0,0,0,.4),0 0 40px rgba(78,207,135,.2)}.card-title{font-size:1.3rem;color:#4ecf87;margin-bottom:20px;text-align:center}.glance-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:20px}.glance-item{text-align:center}.glance-value{font-size:2rem;font-weight:700;color:#fff}.glance-label{font-size:.8rem;color:#a8f5c6}.controls{text-align:center}.mode-indicator{padding:10px 20px;border-radius:50px;font-weight:700;font-size:1rem;margin-bottom:20px;border:2px solid;cursor:pointer;transition:all .3s ease}.mode-auto{background:#27ae60;border-color:#4ecf87;color:#fff}.mode-manual{background:#f39c12;border-color:#f1c40f;color:#fff}.relay-controls{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.relay-btn{padding:12px;border:none;border-radius:10px;font-family:'Orbitron';font-weight:700;font-size:.9rem;cursor:pointer;transition:all .3s ease}.relay-on{background:#27ae60;color:#fff}.relay-off{background:#c0392b;color:#fff}.chart-container{position:relative;height:250px;width:100%}footer{text-align:center;padding:30px 20px;margin-top:40px;border-top:1px solid rgba(78,207,135,.2)}.footer-copyright{color:rgba(224,224,224,.7);font-size:.9rem;margin-bottom:15px;letter-spacing:1px}.footer-team{color:#a8f5c6;font-size:.85rem;line-height:1.6;max-width:900px;margin:0 auto}.footer-team span{display:inline-block;margin:0 10px}.relay-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;align-items:center}.relay-row-label{text-align:left;font-size:.9rem;color:#a8f5c6}.full-width-btn{grid-column:1 / -1;}</style></head><body><div class="container"><div class="header"><h1 class="title">SMARTWATERING MELON GREENHOUSE DASHBOARD</h1></div><div class="grid-layout"><div class="card"><h3 class="card-title">CONTROL PANEL A - OVERVIEW</h3><div class="glance-grid"><div class="glance-item"><div class="glance-value" id="sa_val">--</div><div class="glance-label">Suhu (°C)</div></div><div class="glance-item"><div class="glance-value" id="ta_val">--</div><div class="glance-label">TDS (ppm)</div></div><div class="glance-item"><div class="glance-value" id="pa_val">--</div><div class="glance-label">pH Level</div></div></div></div><div class="card"><h3 class="card-title">CONTROL PANEL B - OVERVIEW</h3><div class="glance-grid"><div class="glance-item"><div class="glance-value" id="sb_val">--</div><div class="glance-label">Suhu (°C)</div></div><div class="glance-item"><div class="glance-value" id="tb_val">--</div><div class="glance-label">TDS (ppm)</div></div><div class="glance-item"><div class="glance-value" id="pb_val">--</div><div class="glance-label">pH Level</div></div></div></div><div class="card controls"><h3 class="card-title">OUTPUT CONTROL</h3><div id="modeBtn" onclick="toggleMode()" class="mode-indicator">Loading...</div><div class="relay-row"><div class="relay-row-label">Peristaltic 1</div><button class="relay-btn" id="r1" onclick="toggleRelay(1)">Toggle</button></div><div class="relay-row"><div class="relay-row-label">Peristaltic 2</div><button class="relay-btn" id="r2" onclick="toggleRelay(2)">Toggle</button></div><div class="relay-row"><div class="relay-row-label">Aerator (SSR)</div><button class="relay-btn" id="r3" onclick="toggleRelay(3)">Toggle</button></div><div class="relay-row"><div class="relay-row-label">Pompa Air (SSR)</div><button class="relay-btn" id="r4" onclick="toggleRelay(4)">Toggle</button></div><div class="relay-row full-width-btn"><button class="relay-btn relay-on" onclick="setAllRelays(true)">Semua ON</button></div><div class="relay-row full-width-btn"><button class="relay-btn relay-off" onclick="setAllRelays(false)">Semua OFF</button></div></div><div class="card"><h3 class="card-title">Temperature Trend (°C)</h3><div class="chart-container"><canvas id="tempChart"></canvas></div></div><div class="card"><h3 class="card-title">TDS Trend (ppm)</h3><div class="chart-container"><canvas id="tdsChart"></canvas></div></div><div class="card"><h3 class="card-title">pH Level Trend</h3><div class="chart-container"><canvas id="phChart"></canvas></div></div></div></div><footer><p class="footer-copyright">&copy; 2025 TEAM RISET BIMA</p><p class="footer-team"><span>Gina Purnama Insany</span> &bull; <span>Ivana Lucia Kharisma</span> &bull; <span>Kamdan</span> &bull; <span>Imam Sanjaya</span> &bull; <span>Muhammad Anbiya Fatah</span> &bull; <span>Panji Angkasa Putra</span></p></footer><script>const MAX_DATA_POINTS=20,chartData={labels:[],tempA:[],tempB:[],tdsA:[],tdsB:[],phA:[],phB:[]};function createChart(t,e,a){return new Chart(t,{type:"line",data:{labels:chartData.labels,datasets:a},options:{responsive:!0,maintainAspectRatio:!1,scales:{x:{ticks:{color:"#a8f5c6"},grid:{color:"rgba(78, 207, 135, 0.1)"}},y:{ticks:{color:"#a8f5c6"},grid:{color:"rgba(78, 207, 135, 0.1)"}}},plugins:{legend:{labels:{color:"#e0e0e0"}}},animation:{duration:500},elements:{line:{tension:.3}}}})}const tempChart=createChart(document.getElementById("tempChart"),"Temperature",[{label:"Sensor A",data:chartData.tempA,borderColor:"#4ecf87",backgroundColor:"rgba(78, 207, 135, 0.2)",fill:!0},{label:"Sensor B",data:chartData.tempB,borderColor:"#f39c12",backgroundColor:"rgba(243, 156, 18, 0.2)",fill:!0}]),tdsChart=createChart(document.getElementById("tdsChart"),"TDS",[{label:"Sensor A",data:chartData.tdsA,borderColor:"#3498db",backgroundColor:"rgba(52, 152, 219, 0.2)",fill:!0},{label:"Sensor B",data:chartData.tdsB,borderColor:"#9b59b6",backgroundColor:"rgba(155, 89, 182, 0.2)",fill:!0}]),phChart=createChart(document.getElementById("phChart"),"pH",[{label:"Sensor A",data:chartData.phA,borderColor:"#e74c3c",backgroundColor:"rgba(231, 76, 60, 0.2)",fill:!0},{label:"Sensor B",data:chartData.phB,borderColor:"#1abc9c",backgroundColor:"rgba(26, 188, 156, 0.2)",fill:!0}]);function updateChartData(t){const e=new Date,a=`${e.getHours().toString().padStart(2,"0")}:${e.getMinutes().toString().padStart(2,"0")}:${e.getSeconds().toString().padStart(2,"0")}`;chartData.labels.length>=MAX_DATA_POINTS&&(chartData.labels.shift(),chartData.tempA.shift(),chartData.tempB.shift(),chartData.tdsA.shift(),chartData.tdsB.shift(),chartData.phA.shift(),chartData.phB.shift()),chartData.labels.push(a),chartData.tempA.push(t.suhuA),chartData.tempB.push(t.suhuB),chartData.tdsA.push(t.tdsA),chartData.tdsB.push(t.tdsB),chartData.phA.push(t.phA),chartData.phB.push(t.phB),tempChart.update(),tdsChart.update(),phChart.update()}function refresh(){fetch("/data").then(t=>t.json()).then(t=>{document.getElementById("sa_val").innerText=t.suhuA.toFixed(1),document.getElementById("ta_val").innerText=t.tdsA.toFixed(0),document.getElementById("pa_val").innerText=t.phA.toFixed(1),document.getElementById("sb_val").innerText=t.suhuB.toFixed(1),document.getElementById("tb_val").innerText=t.tdsB.toFixed(0),document.getElementById("pb_val").innerText=t.phB.toFixed(1);const e=document.getElementById("modeBtn");"auto"===t.mode?(e.className="mode-indicator mode-auto",e.innerText="MODE: AUTOMATIC"):(e.className="mode-indicator mode-manual",e.innerText="MODE: MANUAL"),document.getElementById("r1").className=t.relay1?"relay-btn relay-on":"relay-btn relay-off",document.getElementById("r2").className=t.relay2?"relay-btn relay-on":"relay-btn relay-off",document.getElementById("r3").className=t.relay3?"relay-btn relay-on":"relay-btn relay-off",document.getElementById("r4").className=t.relay4?"relay-btn relay-on":"relay-btn relay-off",updateChartData(t)}).catch(t=>console.error("Error fetching data:",t))}function toggleRelay(t){fetch("/relay?id="+t).then(()=>setTimeout(refresh,200))}function toggleMode(){fetch("/mode?toggle=1").then(()=>setTimeout(refresh,200))}function setAllRelays(t){fetch("/allrelays?state="+(t?"on":"off")).then(()=>setTimeout(refresh,200))}setInterval(refresh,2500),window.onload=refresh;</script></body></html>
 )rawliteral";
+// ---------------- EEPROM / Kalibrasi pH ----------------
+#define EEPROM_SIZE 64
+const int EEPROM_ADDR_A = 0;   // float a (slope)
+const int EEPROM_ADDR_B = 16;  // float b (intercept)
 
+// Untuk kalibrasi serial pH
+const int NUM_SAMPLES = 50;
+const float VREF = 3.3; // asumsi ADC ref 3.3V (sesuaikan kalau ada eksternal ref)
+
+float a_cal = 0.0, b_cal = 0.0; // koefisien kalibrasi pH: pH = a * V + b
+bool calibrated = false;
+float V7 = 0.0, Vx = 0.0; // temporary storage pH7 and pH4/10 sample voltages
+
+// ---------------- Helpers ----------------
+float linInterp(float x, float x0, float x1, float y0, float y1){
+  if (x1 - x0 == 0) return y0;
+  return y0 + (y1 - y0) * ((x - x0) / (x1 - x0));
+}
+
+float readVoltageADC(int pin) {
+  long sum = 0;
+  for (int i = 0; i < NUM_SAMPLES; i++) {
+    sum += analogRead(pin);
+    delay(5);
+  }
+  float raw = (float)sum / NUM_SAMPLES;
+  return raw / 4095.0 * VREF;
+}
+
+float readTemperatureSensor() {
+  sensors.requestTemperatures();
+  float t = sensors.getTempCByIndex(0);
+  if (t == DEVICE_DISCONNECTED_C) return 25.0;
+  return t;
+}
+
+// ---------------- Kalibrasi handlers (Serial non-blocking minimal) ----------------
+void handleSerialMenu() {
+  if (!Serial.available()) return;
+  int cmd = Serial.parseInt();
+
+  if (cmd == 0) return; // nothing
+
+  if (cmd == 1) {
+    float V = readVoltageADC(SENSOR_PH_PIN);
+    float tempC = readTemperatureSensor();
+    Serial.printf("Tegangan = %.4f V, Suhu = %.2f °C\n", V, tempC);
+
+    if (calibrated) {
+      float ph = a_cal * V + b_cal;
+      // Sederhana kompensasi suhu (ratio Kelvin)
+      float slope25 = a_cal;
+      float slopeT = slope25 * ((tempC + 273.15) / 298.15);
+      float phTempComp = (slopeT / slope25) * (a_cal * V) + b_cal;
+      Serial.printf("pH (tanpa kompensasi) = %.2f\n", ph);
+      Serial.printf("pH (kompensasi suhu)  = %.2f\n", phTempComp);
+    } else {
+      // fallback formula lama
+      float v_ph = V;
+      float ph_fallback = PH_OFFSET + (v_ph - 2.5) * PH_SLOPE;
+      Serial.printf("Belum ada kalibrasi. pH (fallback) = %.2f\n", ph_fallback);
+    }
+  }
+
+  else if (cmd == 2) {
+    V7 = readVoltageADC(SENSOR_PH_PIN);
+    Serial.printf("V7 (pH7) = %.4f V\n", V7);
+  }
+
+  else if (cmd == 3) {
+    Vx = readVoltageADC(SENSOR_PH_PIN);
+    Serial.printf("Vx (pH4/10) = %.4f V\n", Vx);
+
+    if (V7 > 0 && Vx > 0) {
+      float pH7 = 7.0;
+      float pHx = 4.0; // jika mau pakai buffer pH10, ubah ke 10.0
+      a_cal = (pHx - pH7) / (Vx - V7);
+      b_cal = pH7 - a_cal * V7;
+      calibrated = true;
+      Serial.printf("Kalibrasi selesai: a=%.6f, b=%.6f\n", a_cal, b_cal);
+    } else {
+      Serial.println("Kalibrasi gagal, pastikan sudah ambil pH7 (command 2).");
+    }
+  }
+
+  else if (cmd == 4) {
+    EEPROM.put(EEPROM_ADDR_A, a_cal);
+    EEPROM.put(EEPROM_ADDR_B, b_cal);
+    EEPROM.commit();
+    Serial.println("Kalibrasi disimpan ke EEPROM.");
+  }
+
+  else if (cmd == 5) {
+    a_cal = 0.0; b_cal = 0.0; calibrated = false;
+    EEPROM.put(EEPROM_ADDR_A, a_cal);
+    EEPROM.put(EEPROM_ADDR_B, b_cal);
+    EEPROM.commit();
+    Serial.println("Kalibrasi direset.");
+  }
+
+  else {
+    Serial.println("Perintah tidak dikenal. (1=Baca,2=Kal pH7,3=Kal pH4/10,4=Simpan,5=Reset)");
+  }
+
+  delay(100);
+}
+
+// ---------------- Membaca sensor A (utama) ----------------
+void bacaSensorA(){
+  // 1. Baca Suhu
+  sensors.requestTemperatures();
+  tempA = sensors.getTempCByIndex(0);
+  if(tempA == DEVICE_DISCONNECTED_C || tempA < -5) {
+    tempA = 25.0; // Nilai default jika sensor error
+  }
+
+  // 2. Baca dan Hitung TDS dengan Kalibrasi 3 Titik (linear interpolation)
+  int rawValue = analogRead(SENSOR_TDS_PIN);
+  float measuredVoltage = rawValue / 4095.0 * 3.3;
+  float tdsValue = 0.0;
+
+  if (measuredVoltage <= voltage_mid) {
+    tdsValue = linInterp(measuredVoltage, voltage_clean, voltage_mid, ppm_clean, ppm_mid);
+  } else {
+    tdsValue = linInterp(measuredVoltage, voltage_mid, voltage_high, ppm_mid, ppm_high);
+  }
+  tdsValue = constrain(tdsValue, 0, 5000);
+  float compensatedTds = tdsValue / (1.0 + 0.02 * (tempA - 25.0));
+  tdsA = compensatedTds; // Simpan hasil akhir ke variabel global tdsA
+
+  // 3. Baca pH -> gunakan kalibrasi EEPROM jika ada
+  float v_ph = readVoltageADC(SENSOR_PH_PIN); // baca tegangan di pin pH
+  if (calibrated) {
+    // pH = a * V + b; + kompensasi suhu (sederhana)
+    float ph_nokomp = a_cal * v_ph + b_cal;
+    float slope25 = a_cal;
+    if (slope25 == 0) {
+      phA = ph_nokomp;
+    } else {
+      float slopeT = slope25 * ((tempA + 273.15) / 298.15);
+      float phTempComp = (slopeT / slope25) * (a_cal * v_ph) + b_cal;
+      phA = phTempComp;
+    }
+  } else {
+    // fallback formula sebelumnya (jika belum kalibrasi)
+    phA = PH_OFFSET + (v_ph - 2.5) * PH_SLOPE;
+  }
+}
+
+// ---------------- Update sensor B (remote) ----------------
+void updateSensorB(float ph, float tds, float temp){ 
+  phB=ph; 
+  tdsB=tds; 
+  tempB=temp; 
+}
+
+// ---------------- Update LCD ----------------
+void updateLCD16x2() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("S:");
+  lcd.print(tempA, 0);
+  lcd.write(byte(0));
+  lcd.print("C");
+  lcd.print(" TDS:");
+  lcd.print(tdsA, 0);
+  
+  lcd.setCursor(0, 1);
+  lcd.print("pH:");
+  lcd.print(phA, 1);
+  lcd.setCursor(8, 1);
+  lcd.print("M:");
+  lcd.print(modeOtomatis ? "Auto" : "Manual");
+}
+
+// ---------------- Fuzzy Sugeno Controller ----------------
+// Menghasilkan keputusan boolean untuk 4 keluaran: peristaltic1, peristaltic2, aerator, pompa_air
+void fuzzyController(bool &outPeris1, bool &outPeris2, bool &outAerator, bool &outPompaAir) {
+  // membership functions (linear ramps)
+  auto mf_temp_high = [](float t)->float{
+    if (t <= 26) return 0.0;
+    if (t >= 32) return 1.0;
+    if (t < 28) return (t - 26.0) / (28.0 - 26.0);
+    return 0.1 + (t - 28.0)/(32.0 - 28.0) * 0.9;
+  };
+
+  auto mf_tds_low = [](float v)->float{
+    if (v <= 1000) return 1.0;
+    if (v >= 1300) return 0.0;
+    return (1300.0 - v) / (300.0);
+  };
+
+  auto mf_tds_high = [](float v)->float{
+    if (v <= 1400) return 0.0;
+    if (v >= 1600) return 1.0;
+    return (v - 1400.0) / 200.0;
+  };
+
+  auto mf_ph_low = [](float p)->float{
+    if (p <= 5.3) return 1.0;
+    if (p >= 5.8) return 0.0;
+    return (5.8 - p) / 0.5;
+  };
+
+  auto mf_ph_high = [](float p)->float{
+    if (p <= 6.0) return 0.0;
+    if (p >= 6.5) return 1.0;
+    return (p - 6.0) / 0.5;
+  };
+
+  float t_high_score = mf_temp_high(tempA);
+  float tds_low_score = mf_tds_low(tdsA);
+  float tds_high_score = mf_tds_high(tdsA);
+  float ph_low_score = mf_ph_low(phA);
+  float ph_high_score = mf_ph_high(phA);
+
+  // Aturan Fuzzy
+  // Aturan 1: pH terlalu rendah -> aktifkan Peristaltic 2 (penyetimbang pH)
+  outPeris2 = (ph_low_score >= 0.7);
+
+  // Aturan 2: pH terlalu tinggi -> aktifkan Peristaltic 1 (penyetimbang pH)
+  outPeris1 = (ph_high_score >= 0.7);
+
+  // Aturan 3: TDS rendah -> aktifkan Pompa Air untuk menambah nutrisi
+  outPompaAir = (tds_low_score >= 0.7);
+
+  // Aturan 4: Suhu tinggi -> aktifkan Aerator
+  outAerator = (t_high_score >= 0.7);
+
+  // Aturan 5: Jika TDS terlalu tinggi, override semua pompa (kecuali aerator)
+  if (tds_high_score >= 0.8) {
+      outPeris1 = false;
+      outPeris2 = false;
+      outPompaAir = false;
+  }
+}
+
+// ---------------- Controller pengganti logicController lama ----------------
+void logicController() {
+  bool outPeris1 = false, outPeris2 = false, outAerator = false, outPompaAir = false;
+  fuzzyController(outPeris1, outPeris2, outAerator, outPompaAir);
+
+  // tulis output ke relay (LOW = ON asumsi modul relay active LOW)
+  digitalWrite(RELAY_PERISTALTIC_1_PIN, outPeris1 ? LOW : HIGH);
+  digitalWrite(RELAY_PERISTALTIC_2_PIN, outPeris2 ? LOW : HIGH);
+  digitalWrite(RELAY_AERATOR_PIN, outAerator ? LOW : HIGH);
+  digitalWrite(RELAY_POMPA_AIR_PIN, outPompaAir ? LOW : HIGH);
+}
+
+// ---------------- Kirim data ke Google Sheet ----------------
 void kirimDataKeGoogleSheet() {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
@@ -82,114 +334,8 @@ void kirimDataKeGoogleSheet() {
   }
 }
 
-void bacaSensorA(){
-  // 1. Baca Suhu
-  sensors.requestTemperatures();
-  tempA = sensors.getTempCByIndex(0);
-  if(tempA == DEVICE_DISCONNECTED_C || tempA < -5) {
-    tempA = 25.0; // Nilai default jika sensor error
-  }
-
-  // 2. Baca dan Hitung TDS dengan Kalibrasi 3 Titik
-  int rawValue = analogRead(SENSOR_TDS_PIN);
-  float measuredVoltage = rawValue / 4095.0 * 3.3;
-  float tdsValue = 0;
-
-  if (measuredVoltage <= voltage_mid) {
-    tdsValue = map(measuredVoltage * 1000, voltage_clean * 1000, voltage_mid * 1000, ppm_clean, ppm_mid);
-  } else {
-    tdsValue = map(measuredVoltage * 1000, voltage_mid * 1000, voltage_high * 1000, ppm_mid, ppm_high);
-  }
-  
-  tdsValue = constrain(tdsValue, 0, 5000);
-  float compensatedTds = tdsValue / (1.0 + 0.02 * (tempA - 25.0));
-  tdsA = compensatedTds; // Simpan hasil akhir ke variabel global tdsA
-
-  // 3. Baca pH
-  float v_ph = analogRead(SENSOR_PH_PIN) / 4095.0 * 5.0;
-  phA = PH_OFFSET + (v_ph - 2.5) * PH_SLOPE;
-}
-
-void updateSensorB(float ph, float tds, float temp){ 
-  phB=ph; 
-  tdsB=tds; 
-  tempB=temp; 
-}
-
-void updateLCD16x2() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("S:");
-  lcd.print(tempA, 0);
-  lcd.write(byte(0));
-  lcd.print("C");
-  lcd.print(" TDS:");
-  lcd.print(tdsA, 0);
-  
-  lcd.setCursor(0, 1);
-  lcd.print("pH:");
-  lcd.print(phA, 1);
-  lcd.setCursor(9, 1);
-  lcd.print("M:");
-  lcd.print(modeOtomatis ? "Auto" : "Manual");
-}
-
-void logicController() {
-  bool outA = false, outB = false, outAer = false;
-  if (tempA > 28) outAer = true;
-
-  if (tdsA > 1400) { // Target atas untuk melon
-    outA = false; outB = false;
-  } else if (tdsA < 1100) { // Target bawah untuk melon
-    outA = true; outB = true;
-  } else {
-    if (phA > 6.5) outA = true; // Target atas pH
-    else if (phA < 5.5) outB = true; // Target bawah pH
-  }
-  digitalWrite(RELAY_POMPA_A_PIN, outA ? LOW : HIGH);
-  digitalWrite(RELAY_POMPA_B_PIN, outB ? LOW : HIGH);
-  digitalWrite(RELAY_AERATOR_PIN, outAer ? LOW : HIGH);
-}
-
-void setup(){
-  Serial.begin(115200);
-  
-  lcd.init();
-  lcd.backlight();
-  lcd.createChar(0, degree_char);
-
-  pinMode(RELAY_POMPA_A_PIN, OUTPUT); digitalWrite(RELAY_POMPA_A_PIN,HIGH);
-  pinMode(RELAY_POMPA_B_PIN, OUTPUT); digitalWrite(RELAY_POMPA_B_PIN,HIGH);
-  pinMode(RELAY_AERATOR_PIN, OUTPUT); digitalWrite(RELAY_AERATOR_PIN,HIGH);
-
-  sensors.begin(); 
-
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
-  lcd.setCursor(0, 0); lcd.print("Connecting WiFi");
-  int attempts = 0;
-  while(WiFi.status() != WL_CONNECTED && attempts < 20){
-    delay(500); 
-    Serial.print(".");
-    lcd.print(".");
-    attempts++;
-  }
-
-  if(WiFi.status() == WL_CONNECTED){
-    Serial.println("\nIP Address: " + WiFi.localIP().toString());
-    lcd.clear();
-    lcd.setCursor(0, 0); lcd.print("IP Address:");
-    lcd.setCursor(0, 1); lcd.print(WiFi.localIP().toString());
-    delay(2000);
-  } else {
-    Serial.println("\nFailed to connect. Starting AP.");
-    lcd.clear();
-    lcd.setCursor(0, 0); lcd.print("WiFi Failed!");
-    lcd.setCursor(0, 1); lcd.print("Starting AP...");
-    WiFi.softAP("SmartMelon-AP", "12345678");
-    delay(2000);
-  }
-
+// ---------------- Web server endpoints ----------------
+void setupWebServer(){
   server.on("/",HTTP_GET,[](AsyncWebServerRequest *r){ r->send_P(200,"text/html",index_html); });
   
   server.on("/data",HTTP_GET,[](AsyncWebServerRequest *r){
@@ -197,9 +343,10 @@ void setup(){
     json+="\"suhuA\":"+String(tempA,1)+",\"tdsA\":"+String(tdsA,0)+",\"phA\":"+String(phA,1)+",";
     json+="\"suhuB\":"+String(tempB,1)+",\"tdsB\":"+String(tdsB,0)+",\"phB\":"+String(phB,1)+",";
     json+="\"mode\":\""+String(modeOtomatis?"auto":"manual")+"\",";
-    json += "\"relay1\":" + String(digitalRead(RELAY_POMPA_A_PIN)==LOW ? "true" : "false") + ",";
-    json += "\"relay2\":" + String(digitalRead(RELAY_POMPA_B_PIN)==LOW ? "true" : "false") + ",";
-    json += "\"relay3\":" + String(digitalRead(RELAY_AERATOR_PIN)==LOW ? "true" : "false");
+    json += "\"relay1\":" + String(digitalRead(RELAY_PERISTALTIC_1_PIN)==LOW ? "true" : "false") + ",";
+    json += "\"relay2\":" + String(digitalRead(RELAY_PERISTALTIC_2_PIN)==LOW ? "true" : "false") + ",";
+    json += "\"relay3\":" + String(digitalRead(RELAY_AERATOR_PIN)==LOW ? "true" : "false") + ",";
+    json += "\"relay4\":" + String(digitalRead(RELAY_POMPA_AIR_PIN)==LOW ? "true" : "false");
     json+="}";
     r->send(200,"application/json",json);
   });
@@ -213,10 +360,17 @@ void setup(){
     } else r->send(400,"text/plain","Missing params");
   });
 
+  // Endpoint untuk mengontrol setiap relay secara terpisah
   server.on("/relay",HTTP_GET,[](AsyncWebServerRequest *r){
     if (r->hasParam("id")) {
       int id=r->getParam("id")->value().toInt();
-      int pin=(id==1?RELAY_POMPA_A_PIN:id==2?RELAY_POMPA_B_PIN:id==3?RELAY_AERATOR_PIN:-1);
+      int pin;
+      if (id==1) pin=RELAY_PERISTALTIC_1_PIN;
+      else if (id==2) pin=RELAY_PERISTALTIC_2_PIN;
+      else if (id==3) pin=RELAY_AERATOR_PIN;
+      else if (id==4) pin=RELAY_POMPA_AIR_PIN;
+      else pin = -1;
+      
       if(pin!=-1){ 
         digitalWrite(pin,!digitalRead(pin)); 
         modeOtomatis=false;
@@ -230,9 +384,98 @@ void setup(){
     r->send(200,"text/plain","OK");
   });
 
+  // Endpoint untuk mengontrol semua pompa sekaligus
+  server.on("/allrelays", HTTP_GET, [](AsyncWebServerRequest *r){
+    if(r->hasParam("state")) {
+      String state = r->getParam("state")->value();
+      modeOtomatis = false; // Matikan mode otomatis saat kontrol manual
+
+      if (state == "on") {
+        digitalWrite(RELAY_PERISTALTIC_1_PIN, LOW);
+        digitalWrite(RELAY_PERISTALTIC_2_PIN, LOW);
+        digitalWrite(RELAY_AERATOR_PIN, LOW);
+        digitalWrite(RELAY_POMPA_AIR_PIN, LOW);
+        r->send(200, "text/plain", "All relays ON. Auto mode disabled.");
+      } else if (state == "off") {
+        digitalWrite(RELAY_PERISTALTIC_1_PIN, HIGH);
+        digitalWrite(RELAY_PERISTALTIC_2_PIN, HIGH);
+        digitalWrite(RELAY_AERATOR_PIN, HIGH);
+        digitalWrite(RELAY_POMPA_AIR_PIN, HIGH);
+        r->send(200, "text/plain", "All relays OFF. Auto mode disabled.");
+      } else {
+        r->send(400, "text/plain", "Invalid state.");
+      }
+    } else {
+      r->send(400, "text/plain", "Missing state parameter.");
+    }
+  });
+
   server.begin();
 }
 
+// ---------------- Setup ----------------
+// ... (kode Anda tetap sama sampai bagian setup() )
+void setup(){
+  Serial.begin(115200);
+  delay(100);
+
+  // EEPROM
+  EEPROM.begin(EEPROM_SIZE);
+  EEPROM.get(EEPROM_ADDR_A, a_cal);
+  EEPROM.get(EEPROM_ADDR_B, b_cal);
+  if (!isnan(a_cal) && !isnan(b_cal) && a_cal != 0.0) {
+    calibrated = true;
+    Serial.printf("Kalibrasi ditemukan: a=%.6f, b=%.6f\n", a_cal, b_cal);
+  } else {
+    Serial.println("Belum ada kalibrasi, lakukan dulu (2 lalu 3).");
+  }
+
+  // LCD
+  lcd.init();
+  lcd.backlight();
+  lcd.createChar(0, degree_char);
+
+  // Relay pin init (active LOW)
+  pinMode(RELAY_PERISTALTIC_1_PIN, OUTPUT); digitalWrite(RELAY_PERISTALTIC_1_PIN,HIGH);
+  pinMode(RELAY_PERISTALTIC_2_PIN, OUTPUT); digitalWrite(RELAY_PERISTALTIC_2_PIN,HIGH);
+  pinMode(RELAY_AERATOR_PIN, OUTPUT); digitalWrite(RELAY_AERATOR_PIN,HIGH); 
+  pinMode(RELAY_POMPA_AIR_PIN, OUTPUT); digitalWrite(RELAY_POMPA_AIR_PIN,HIGH); 
+
+  // DS18B20
+  sensors.begin(); 
+
+  // ADC config for pH pin
+  analogReadResolution(12);
+  analogSetPinAttenuation(SENSOR_PH_PIN, ADC_11db);
+
+  // WiFi
+WiFi.mode(WIFI_STA);
+WiFi.begin(ssid,password);
+
+// tunggu sampai benar2 siap
+while (WiFi.status() != WL_CONNECTED) {
+  delay(500);
+  Serial.print(".");
+}
+Serial.println("\nWiFi connected!");
+Serial.println(WiFi.localIP());
+
+// delay kecil biar TCP stack siap
+delay(1000);
+
+// baru mulai server
+setupWebServer();
+
+  Serial.println("\n-- Smart Melon Ready --");
+  Serial.println("Menu:");
+  Serial.println("1 = Baca tegangan, suhu, & pH");
+  Serial.println("2 = Kalibrasi pH7 (celup ke buffer pH7 lalu tekan 2)");
+  Serial.println("3 = Kalibrasi pH4/10 (celup ke buffer pH4/10 lalu tekan 3)");
+  Serial.println("4 = Simpan kalibrasi ke EEPROM");
+  Serial.println("5 = Reset kalibrasi");
+}
+
+// ---------------- Main loop ----------------
 void loop(){
   unsigned long now=millis();
   if(now - prevMillis >= interval){
@@ -243,7 +486,13 @@ void loop(){
     kirimDataKeGoogleSheet();
 
     if(modeOtomatis){
-      logicController();
+      logicController(); // sekarang menggunakan fuzzy Sugeno
     }
   }
+
+  // cek serial menu non-blocking
+  handleSerialMenu();
+
+  // jangan block loop terlalu lama
+  delay(10);
 }
