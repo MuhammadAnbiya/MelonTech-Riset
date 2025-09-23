@@ -4,13 +4,13 @@
 // Inisialisasi LCD I2C (alamat umum 0x27, bisa 0x3F tergantung modul)
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-float calibration_value = 21.34 - 2.87;
+float calibration_value = 21.34 - 0.05;
 unsigned long int avgval;
 int buffer_arr[10], temp;
 float ph_act;
 
 // Tentukan pin analog untuk sensor pH
-#define PH_SENSOR_PIN 34   // GPIO34 contoh, bisa ganti ke pin analog lain
+#define PH_SENSOR_PIN 35   // GPIO34 contoh, bisa ganti ke pin analog lain
 
 void setup() {
   Wire.begin();
