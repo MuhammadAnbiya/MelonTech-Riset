@@ -1,16 +1,3 @@
-/******************************************************************************
- * Proyek: Smart Watering Melon Tech Nusa Putra Riset BIMA
- * Versi: FINAL - KALIBRASI AKURAT DEBIT POMPA A & B
- * Deskripsi: Implementasi sistem Fuzzy Logic dan kontrol manual presisi
- * untuk Pompa A (AB Mix A) dan Pompa B (AB Mix B).
- * PERUBAHAN:
- * - Membuat konstanta debit terpisah untuk Pompa A (214.28 mL/s) dan Pompa B (125.0 mL/s).
- * - Memperbaiki logika Dosis Presisi untuk menghitung durasi berdasarkan pompa yang dipilih.
- ******************************************************************************/
-
-// =================================================================================
-// --- PUSTAKA (LIBRARIES) ---
-// =================================================================================
 #include <Arduino.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
