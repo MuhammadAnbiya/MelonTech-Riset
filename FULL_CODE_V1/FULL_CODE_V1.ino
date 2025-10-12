@@ -1,6 +1,6 @@
 /******************************************************************************
  * Proyek: Smart Watering Melon Tech Nusa Putra Riset BIMA
- * Versi: UI & LOGIC FINAL (CLEAN)
+ * Versi: UI & LOGIC FINAL (TDS FIX)
  ******************************************************************************/
 
 #include <Arduino.h>
@@ -40,7 +40,8 @@ const float VOLTAGE_MID_TDS   = 2.3448;
 const float PPM_MID_TDS       = 1250.0;
 const float VOLTAGE_HIGH_TDS  = 2.4509;
 const float PPM_HIGH_TDS      = 2610.0;
-const float VOLTAGE_THRESHOLD_TDS_DRY = 0.15;
+// --- PERBAIKAN: Menurunkan threshold agar nilai tegangan rendah tetap dihitung ---
+const float VOLTAGE_THRESHOLD_TDS_DRY = 0.02;
 
 // --- OBJEK & VARIABEL GLOBAL ---
 Fuzzy *fuzzy_EC_Control = new Fuzzy();
