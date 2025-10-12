@@ -1,17 +1,8 @@
 /******************************************************************************
  * Proyek: Smart Watering Melon Tech Nusa Putra Riset BIMA
- * Versi: UI & LOGIC FINAL (REVISED)
- * Deskripsi: Implementasi DUA sistem Fuzzy Logic dengan UI Dashboard baru.
- * PERUBAHAN UTAMA:
- * - UI Dashboard dirombak untuk menggabungkan "Pengaturan Hari" dan "EC Control"
- * menjadi satu kotak, sehingga total menjadi 9 kotak.
- * - Fungsi readVoltageADC disederhanakan untuk meningkatkan keandalan pembacaan sensor.
- * - Menambahkan output diagnostik untuk voltase mentah sensor.
+ * Versi: UI & LOGIC FINAL (CLEAN)
  ******************************************************************************/
 
-// =================================================================================
-// --- PUSTAKA (LIBRARIES) ---
-// =================================================================================
 #include <Arduino.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -22,15 +13,13 @@
 #include <EEPROM.h>
 #include <Fuzzy.h>
 
-// =================================================================================
 // --- KONFIGURASI & PINOUT ---
-// =================================================================================
 const char* ssid = "ADVAN V1 PRO-8F7379";
 const char* password = "7C27964D";
-const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbyOwHUUnxrJS7XkWEbSF5lOyRsUjFB2b1fMXdv-uWvZv_eJlIJgdHDIoHopOoPLJ2r_Zw/exec";
+const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbykPgTShvrR1f4P7--ePX_PreK6hs72qzP2epQvB62gPjbhT8BuM47060T0tFlP_ettiw/exec"; 
 #define SENSOR_TDS_PIN          34
 #define SENSOR_PH_PIN           35
-#define SENSOR_SUHU_PIN         4
+#define SENSOR_SUHU_PIN         13
 #define RELAY_PUMP_A_PIN        25
 #define RELAY_PUMP_B_PIN        26
 const float PPM_TO_EC_CONVERSION_FACTOR = 700.0;
@@ -53,11 +42,9 @@ const float VOLTAGE_HIGH_TDS  = 2.4509;
 const float PPM_HIGH_TDS      = 2610.0;
 const float VOLTAGE_THRESHOLD_TDS_DRY = 0.15;
 
-// =================================================================================
 // --- OBJEK & VARIABEL GLOBAL ---
-// =================================================================================
-Fuzzy *fuzzy_EC_Control = new Fuzzy(); // Fuzzy untuk kontrol pompa
-Fuzzy *fuzzy_Status_Check = new Fuzzy(); // Fuzzy untuk status kondisi
+Fuzzy *fuzzy_EC_Control = new Fuzzy();
+Fuzzy *fuzzy_Status_Check = new Fuzzy();
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 AsyncWebServer server(80);
@@ -93,11 +80,8 @@ const char index_html[] PROGMEM = R"=====(
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>🍈 Smart Melon Greenhouse</title><script src="https://cdn.jsdelivr.net/npm/chart.js"></script><style>@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Orbitron',monospace;background:linear-gradient(135deg,#0f2027,#203a43,#2c5364);color:#e0e0e0;overflow-x:hidden}.container{max-width:1400px;margin:0 auto;padding:20px}.header{text-align:center;margin-bottom:30px}.title{font-size:2.5rem;font-weight:900;background:linear-gradient(45deg,#4ecf87,#fff,#a8f5c6);-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-shadow:0 0 25px rgba(78,207,135,.5);animation:glow 2s ease-in-out infinite alternate}@keyframes glow{from{text-shadow:0 0 20px rgba(78,207,135,.4)}to{text-shadow:0 0 35px rgba(78,207,135,.7),0 0 50px rgba(78,207,135,.2)}}.grid-layout{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px}.card{background:rgba(42,63,80,.5);backdrop-filter:blur(10px);border:1px solid rgba(78,207,135,.2);border-radius:15px;padding:20px;box-shadow:0 8px 32px rgba(0,0,0,.3);transition:all .3s ease}.card-title{font-size:1.3rem;color:#4ecf87;margin-bottom:20px;text-align:center}.glance-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:15px;margin-bottom:20px}.glance-item{text-align:center}.glance-value{font-size:1.8rem;font-weight:700;color:#fff}.glance-label{font-size:.75rem;color:#a8f5c6}.controls{text-align:center}.mode-indicator{padding:10px 20px;border-radius:50px;font-weight:700;font-size:1rem;margin-bottom:20px;border:2px solid;cursor:pointer;transition:all .3s ease}.mode-auto{background:#27ae60;border-color:#4ecf87;color:#fff}.mode-manual{background:#f39c12;border-color:#f1c40f;color:#fff}.relay-btn{padding:12px;border:none;border-radius:10px;font-family:'Orbitron';font-weight:700;font-size:.9rem;cursor:pointer;transition:all .3s ease}.relay-on{background:#27ae60;color:#fff}.relay-off{background:#c0392b;color:#fff}.chart-container{position:relative;height:250px;width:100%}.logic-status-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px;text-align:center}.logic-label{font-size:.75rem;color:#a8f5c6;margin-bottom:5px}.logic-value{font-size:1.5rem;font-weight:700;color:#fff}.logic-value.small{font-size:1.2rem;word-wrap:break-word;}.full-span{grid-column:1 / -1}footer{text-align:center;padding:30px 20px;margin-top:40px;border-top:1px solid rgba(78,207,135,.2)}.relay-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;align-items:center}.relay-row-label{text-align:left;font-size:.9rem;color:#a8f5c6}.dosing-controls{margin-top:20px;border-top:1px solid rgba(78,207,135,.2);padding-top:20px}.dosing-input-group{display:flex;gap:10px;margin-bottom:10px}.dosing-input{flex-grow:1;padding:10px;background:rgba(0,0,0,.3);border:1px solid #4ecf87;border-radius:8px;color:#fff;font-family:'Orbitron';font-size:.9rem}.dosing-btn-group{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}.dosing-btn{background:#3498db;color:#fff}.dosing-status{margin-top:10px;font-size:1rem;color:#f1c40f;min-height:24px;text-align:center}.status-box{background:rgba(0,0,0,.2);border-radius:8px;padding:15px;text-align:center}.status-label{font-size:.9rem;color:#a8f5c6;margin-bottom:8px}.status-value{font-size:1.3rem;font-weight:700;color:#fff;min-height:30px}</style></head><body><div class="container"><div class="header"><h1 class="title">SMARTWATERING MELON GREENHOUSE DASHBOARD</h1></div><div class="grid-layout"><div class="card"><h3 class="card-title">CONTROL PANEL A - OVERVIEW</h3><div class="glance-grid"><div class="glance-item"><div class="glance-value" id="sa_val">--</div><div class="glance-label">Suhu (°C)</div></div><div class="glance-item"><div class="glance-value" id="ta_val">--</div><div class="glance-label">TDS (ppm)</div></div><div class="glance-item"><div class="glance-value" id="eca_val">--</div><div class="glance-label">EC (mS/cm)</div></div><div class="glance-item"><div class="glance-value" id="pa_val">--</div><div class="glance-label">pH Level</div></div></div></div><div class="card"><h3 class="card-title">CONTROL PANEL B - OVERVIEW</h3><div class="glance-grid"><div class="glance-item"><div class="glance-value" id="sb_val">--</div><div class="glance-label">Suhu (°C)</div></div><div class="glance-item"><div class="glance-value" id="tb_val">--</div><div class="glance-label">TDS (ppm)</div></div><div class="glance-item"><div class="glance-value" id="ecb_val">--</div><div class="glance-label">EC (mS/cm)</div></div><div class="glance-item"><div class="glance-value" id="pb_val">--</div><div class="glance-label">pH Level</div></div></div></div><div class="card"><h3 class="card-title">STATUS KONDISI NUTRISI</h3><div class="logic-status-grid"><div class="status-box"><div class="status-label">PANEL A</div><div class="status-value" id="status_a_val">--</div></div><div class="status-box"><div class="status-label">PANEL B</div><div class="status-value" id="status_b_val">--</div></div></div></div><div class="card"><h3 class="card-title">PENGATURAN & EC KONTROL</h3><div class="logic-status-grid"><div class="logic-item"><div class="logic-label">Umur Saat Ini (Hari)</div><div class="logic-value" id="plant_age">--</div></div><div class="logic-item"><div class="dosing-input-group"><input type="number" id="plant_age_input" class="dosing-input" placeholder="Set Hari..."><button class="relay-btn dosing-btn" onclick="setPlantAge()">Set</button></div></div><div class="logic-item"><div class="logic-label">Target EC</div><div class="logic-value small" id="target_nutrisi">--</div></div><div class="logic-item"><div class="logic-label">Keputusan Dosis</div><div class="logic-value small" id="fuzzy_decision">--</div></div></div></div><div class="card controls"><h3 class="card-title">OUTPUT CONTROL</h3><div id="modeBtn" onclick="toggleMode()" class="mode-indicator">Loading...</div><div class="relay-row"><div class="relay-row-label">Pompa Nutrisi AB Mix A</div><button class="relay-btn" id="r_pump1" onclick="toggleRelay(1)">Toggle</button></div><div class="relay-row"><div class="relay-row-label">Pompa Nutrisi AB Mix B</div><button class="relay-btn" id="r_pump2" onclick="toggleRelay(2)">Toggle</button></div><div class="dosing-controls"><h4 class="card-title" style="font-size:1.1rem;margin-bottom:15px">Kontrol Dosis Presisi (mL)</h4><div class="dosing-input-group"><input type="number" id="dose_ml" class="dosing-input" placeholder="Masukkan mL..."><button class="relay-btn dosing-btn" onclick="startDose('both')">Dosis A+B</button></div><div class="dosing-btn-group"><button class="relay-btn dosing-btn" onclick="startDose('A')">Dosis A</button><button class="relay-btn dosing-btn" onclick="startDose('B')">Dosis B</button></div><div class="dosing-status" id="dose_status">Idle</div></div></div><div class="card"><h3 class="card-title">Temperature Trend (°C)</h3><div class="chart-container"><canvas id="tempChart"></canvas></div></div><div class="card"><h3 class="card-title">TDS Trend (ppm)</h3><div class="chart-container"><canvas id="tdsChart"></canvas></div></div><div class="card"><h3 class="card-title">pH Level Trend</h3><div class="chart-container"><canvas id="phChart"></canvas></div></div><div class="card"><h3 class="card-title">EC Trend (mS/cm)</h3><div class="chart-container"><canvas id="ecChart"></canvas></div></div></div><footer><p class="footer-copyright">&copy; 2025 TEAM RISET BIMA</p><p class="footer-team"><span>Gina Purnama Insany</span> &bull; <span>Ivana Lucia Kharisma</span> &bull; <span>Kamdan</span> &bull; <span>Imam Sanjaya</span> &bull; <span>Muhammad Anbiya Fatah</span> &bull; <span>Panji Angkasa Putra</span></p></footer><script>const MAX_DATA_POINTS=20,chartData={labels:[],tempA:[],tempB:[],tdsA:[],tdsB:[],phA:[],phB:[],ecA:[],ecB:[]};let isManualMode=false;function createChart(t,e,a){return new Chart(t,{type:"line",data:{labels:chartData.labels,datasets:a},options:{responsive:!0,maintainAspectRatio:!1,scales:{x:{ticks:{color:"#a8f5c6"},grid:{color:"rgba(78,207,135,0.1)"}},y:{ticks:{color:"#a8f5c6"},grid:{color:"rgba(78,207,135,0.1)"}}},plugins:{legend:{labels:{color:"#e0e0e0"}}},animation:{duration:500},elements:{line:{tension:.3}}}})}const tempChart=createChart(document.getElementById("tempChart"),"Temperature",[{label:"Sensor A",data:chartData.tempA,borderColor:"#4ecf87",backgroundColor:"rgba(78,207,135,0.2)",fill:!0},{label:"Sensor B",data:chartData.tempB,borderColor:"#f39c12",backgroundColor:"rgba(243,156,18,0.2)",fill:!0}]),tdsChart=createChart(document.getElementById("tdsChart"),"TDS",[{label:"Sensor A",data:chartData.tdsA,borderColor:"#3498db",backgroundColor:"rgba(52,152,219,0.2)",fill:!0},{label:"Sensor B",data:chartData.tdsB,borderColor:"#9b59b6",backgroundColor:"rgba(155,89,182,0.2)",fill:!0}]),phChart=createChart(document.getElementById("phChart"),"pH",[{label:"Sensor A",data:chartData.phA,borderColor:"#e74c3c",backgroundColor:"rgba(231,76,60,0.2)",fill:!0},{label:"Sensor B",data:chartData.phB,borderColor:"#1abc9c",backgroundColor:"rgba(26,188,156,0.2)",fill:!0}]),ecChart=createChart(document.getElementById("ecChart"),"EC",[{label:"Sensor A",data:chartData.ecA,borderColor:"#f1c40f",backgroundColor:"rgba(241,196,15,0.2)",fill:!0},{label:"Sensor B",data:chartData.ecB,borderColor:"#e67e22",backgroundColor:"rgba(230,126,34,0.2)",fill:!0}]);function updateChartData(t){const e=new Date,a=`${e.getHours().toString().padStart(2,"0")}:${e.getMinutes().toString().padStart(2,"0")}:${e.getSeconds().toString().padStart(2,"0")}`;chartData.labels.length>=MAX_DATA_POINTS&&(chartData.labels.shift(),chartData.tempA.shift(),chartData.tempB.shift(),chartData.tdsA.shift(),chartData.tdsB.shift(),chartData.phA.shift(),chartData.phB.shift(),chartData.ecA.shift(),chartData.ecB.shift()),chartData.labels.push(a),chartData.tempA.push(t.suhuA),chartData.tempB.push(t.suhuB),chartData.tdsA.push(t.tdsA),chartData.tdsB.push(t.tdsB),chartData.phA.push(t.phA),chartData.phB.push(t.phB),chartData.ecA.push(t.ecA),chartData.ecB.push(t.ecB),tempChart.update(),tdsChart.update(),phChart.update(),ecChart.update()}function refresh(){fetch("/data").then(e=>{if(!e.ok)throw new Error(`Network response was not ok: ${e.statusText}`);return e.text()}).then(e=>{try{const t=JSON.parse(e);document.getElementById("sa_val").innerText=t.suhuA.toFixed(1),document.getElementById("ta_val").innerText=t.tdsA.toFixed(0),document.getElementById("pa_val").innerText=t.phA.toFixed(1),document.getElementById("eca_val").innerText=t.ecA.toFixed(2),document.getElementById("sb_val").innerText=t.suhuB.toFixed(1),document.getElementById("tb_val").innerText=t.tdsB.toFixed(0),document.getElementById("pb_val").innerText=t.phB.toFixed(1),document.getElementById("ecb_val").innerText=t.ecB.toFixed(2);const o=document.getElementById("modeBtn");isManualMode="manual"===t.mode,isManualMode?(o.className="mode-indicator mode-manual",o.innerText="MODE: MANUAL"):(o.className="mode-indicator mode-auto",o.innerText="MODE: AUTOMATIC"),document.getElementById("r_pump1").className=t.pumpAState?"relay-btn relay-on":"relay-btn relay-off",document.getElementById("r_pump2").className=t.pumpBState?"relay-btn relay-on":"relay-btn relay-off",document.getElementById("plant_age").innerText=t.plantAge,document.getElementById("target_nutrisi").innerText=t.targetNutrisi,document.getElementById("fuzzy_decision").innerText=t.fuzzyDecision,document.getElementById("dose_status").innerText=t.dosingStatus;const n=document.getElementById("status_a_val");n.innerText=t.statusA,n.style.color="Kelebihan"===t.statusA?"#e74c3c":"Kekurangan"===t.statusA?"#f1c40f":"#4ecf87";const d=document.getElementById("status_b_val");d.innerText=t.statusB,d.style.color="Kelebihan"===t.statusB?"#e74c3c":"Kekurangan"===t.statusB?"#f1c40f":"#4ecf87",updateChartData(t)}catch(t){console.error("Failed to parse JSON:",t),console.error("Raw response from server was:",e)}}).catch(e=>{console.error("Error fetching data:",e)})}function toggleRelay(t){fetch(`/relay?id=${t}`).then(()=>setTimeout(refresh,200))}function toggleMode(){fetch("/mode?toggle=1").then(()=>setTimeout(refresh,200))}function startDose(t){if(!isManualMode)return void alert("Dosing can only be done in MANUAL mode.");const e=document.getElementById("dose_ml").value;if(!e||e<=0)return void alert("Please enter a valid amount in mL.");const a=document.getElementById("dose_status");a.innerText=`Sending command for ${e}mL...`,fetch(`/dose?ml=${e}&pump=${t}`).then(e=>{if(!e.ok)return e.text().then(t=>{throw new Error(t||"Failed to start dosing")});return e.text()}).then(e=>{a.innerText=e,setTimeout(refresh,200)}).catch(e=>{a.innerText=`Error: ${e.message}`,console.error("Dosing error:",e)})}function setPlantAge(){const t=document.getElementById("plant_age_input"),e=t.value;if(!e||e<=0)return void alert("Masukkan umur tanaman yang valid.");fetch(`/setAge?days=${e}`).then(e=>{if(!e.ok)throw new Error("Gagal mengupdate umur tanaman.");return e.text()}).then(a=>{alert(`Sukses: ${a}`),t.value="",setTimeout(refresh,200)}).catch(t=>{alert(`Error: ${t.message}`)})}setInterval(refresh,2500),window.onload=refresh;</script></body></html>
 )=====";
 
-// =================================================================================
 // --- FUNGSI-FUNGSI BANTU ---
-// =================================================================================
 float linInterp(float x, float x0, float x1, float y0, float y1) { if (x1 - x0 == 0) return y0; return y0 + (y1 - y0) * ((x - x0) / (x1 - x0)); }
-
 float readVoltageADC(int pin) {
   const int NUM_SAMPLES = 40;
   const float VREF = 3.3;
@@ -109,18 +93,14 @@ float readVoltageADC(int pin) {
   float raw = (float)sum / NUM_SAMPLES;
   return raw / 4095.0 * VREF;
 }
-
 float readTemperatureSensor() { sensors.requestTemperatures(); float t = sensors.getTempCByIndex(0); if (t == DEVICE_DISCONNECTED_C || t < -20 || t > 80) return 25.0; return t; }
 float hitungEC_from_TDS(float tdsValue) { if (PPM_TO_EC_CONVERSION_FACTOR == 0) return 0; return tdsValue / PPM_TO_EC_CONVERSION_FACTOR; }
 float readpH(float v_ph, float temp_celsius) { if (ph_slope == 0.0) return 0.0; float compensated_slope = ph_slope * (temp_celsius + 273.15) / (25.0 + 273.15); float ph_value = 7.0 + (ph_neutral_v - v_ph) / compensated_slope; ph_value += PH_AIR_OFFSET; return constrain(ph_value, 0.0, 14.0); }
 
-// =================================================================================
-// --- FUNGSI UTAMA PEMBACAAN SENSOR & UPDATE LCD ---
-// =================================================================================
+// --- FUNGSI UTAMA PEMBACAAN SENSOR ---
 void bacaSensorA() {
   tempA = readTemperatureSensor();
   float measuredVoltage_TDS = readVoltageADC(SENSOR_TDS_PIN);
-  Serial.printf("DIAG: Raw Voltage TDS: %.4fV\n", measuredVoltage_TDS); // DIAGNOSTIK
   
   if (measuredVoltage_TDS < VOLTAGE_THRESHOLD_TDS_DRY) { 
     tdsA = 0.0; 
@@ -136,8 +116,6 @@ void bacaSensorA() {
   ecA = hitungEC_from_TDS(tdsA);
 
   float v_ph = readVoltageADC(SENSOR_PH_PIN); 
-  Serial.printf("DIAG: Raw Voltage pH: %.4fV\n", v_ph); // DIAGNOSTIK
-
   if (v_ph >= VOLTAGE_THRESHOLD_PH_DRY) { phA = 7.0; } 
   else if (ph_slope != 0.0) { phA = readpH(v_ph, tempA); } 
   else { phA = 0.0; }
@@ -153,9 +131,7 @@ void updateLCD16x2() {
   lcd.setCursor(13, 1); lcd.print(modeStr);
 }
 
-// =================================================================================
 // --- BAGIAN LOGIKA FUZZY ---
-// =================================================================================
 struct TargetNutrisiEC { 
   float ec_bawah; 
   float ec_atas; 
@@ -178,7 +154,6 @@ TargetNutrisiEC getTargetNutrisiEC(int hari) {
   return target; 
 }
 
-// --- PERUBAHAN BARU: FUZZY SYSTEM #1 - KONTROL POMPA BERBASIS EC ---
 void setupFuzzy_EC_Control() {
   FuzzyInput *errorEC = new FuzzyInput(1);
   FuzzySet *tinggi = new FuzzySet(-2.0, -2.0, -1.0, -0.3);
@@ -227,10 +202,7 @@ void setupFuzzy_EC_Control() {
 
 void runPumpController() { 
   if (isDosing) return;
-
   TargetNutrisiEC target = getTargetNutrisiEC(umurTanamanHari); 
-  String fuzzyTargetMessage = "EC " + String(target.ec_bawah, 1) + "-" + String(target.ec_atas, 1);
-  
   float target_mid_ec = (target.ec_bawah + target.ec_atas) / 2.0;
   float error_ec = target_mid_ec - ecA;
 
@@ -251,23 +223,19 @@ void runPumpController() {
   }
 }
 
-// --- PERUBAHAN BARU: FUZZY SYSTEM #2 - STATUS KONDISI BERBASIS 3 SENSOR ---
 void setupFuzzy_Status_Check() {
-  // Input 1: Suhu
   FuzzyInput *suhu = new FuzzyInput(1);
-  suhu->addFuzzySet(new FuzzySet(0, 0, 15, 18));    // Rendah
-  suhu->addFuzzySet(new FuzzySet(18, 21.5, 21.5, 25)); // Sedang
-  suhu->addFuzzySet(new FuzzySet(25, 28, 30, 30));    // Tinggi
+  suhu->addFuzzySet(new FuzzySet(0, 0, 15, 18));
+  suhu->addFuzzySet(new FuzzySet(18, 21.5, 21.5, 25));
+  suhu->addFuzzySet(new FuzzySet(25, 28, 30, 30));
   fuzzy_Status_Check->addFuzzyInput(suhu);
 
-  // Input 2: pH
   FuzzyInput *ph = new FuzzyInput(2);
-  ph->addFuzzySet(new FuzzySet(1, 1, 5.0, 5.5)); // Asam
-  ph->addFuzzySet(new FuzzySet(5.5, 6.0, 6.5, 7.0)); // Netral
-  ph->addFuzzySet(new FuzzySet(7.0, 7.5, 14, 14)); // Basa
+  ph->addFuzzySet(new FuzzySet(1, 1, 5.0, 5.5));
+  ph->addFuzzySet(new FuzzySet(5.5, 6.0, 6.5, 7.0));
+  ph->addFuzzySet(new FuzzySet(7.0, 7.5, 14, 14));
   fuzzy_Status_Check->addFuzzyInput(ph);
 
-  // Input 3: TDS
   FuzzyInput *tds = new FuzzyInput(3);
   FuzzySet *tds_rendah_fs = new FuzzySet(0, 0, 350, 700);
   tds->addFuzzySet(tds_rendah_fs);
@@ -277,7 +245,6 @@ void setupFuzzy_Status_Check() {
   tds->addFuzzySet(tds_tinggi_fs);
   fuzzy_Status_Check->addFuzzyInput(tds);
 
-  // Output: Status Kondisi (Sugeno-style output)
   FuzzyOutput *kondisi = new FuzzyOutput(1);
   FuzzySet *kekurangan_fs = new FuzzySet(1, 1, 1, 1);
   kondisi->addFuzzySet(kekurangan_fs);
@@ -287,7 +254,6 @@ void setupFuzzy_Status_Check() {
   kondisi->addFuzzySet(kelebihan_fs);
   fuzzy_Status_Check->addFuzzyOutput(kondisi);
 
-  // ATURAN (RULE BASE)
   FuzzyRuleAntecedent *if_tds_rendah = new FuzzyRuleAntecedent();
   if_tds_rendah->joinSingle(tds_rendah_fs);
   FuzzyRuleConsequent *then_kekurangan = new FuzzyRuleConsequent();
@@ -320,12 +286,9 @@ String runStatusFuzzyLogic(float suhu, float ph, float tds) {
 }
 
 
-// =================================================================================
 // --- KOMUNIKASI & WEB SERVER ---
-// =================================================================================
 void kirimDataKeGoogleSheet() {
   if (WiFi.status() == WL_CONNECTED) {
-    // Siapkan data yang aman dari NaN/inf
     float s_tempA = isnan(tempA) || isinf(tempA) ? 0.0 : tempA;
     float s_tdsA  = isnan(tdsA)  || isinf(tdsA)  ? 0.0 : tdsA;
     float s_phA   = isnan(phA)   || isinf(phA)   ? 0.0 : phA;
@@ -337,10 +300,9 @@ void kirimDataKeGoogleSheet() {
 
     char urlBuffer[512];
     snprintf(urlBuffer, sizeof(urlBuffer),
-              "%s?suhuA=%.1f&tdsA=%.0f&phA=%.2f&ecA=%.2f&statusA=%s&suhuB=%.1f&tdsB=%.0f&phB=%.2f&ecB=%.2f&statusB=%s",
+              "%s?suhuA=%.1f&suhuB=%.1f&tdsA=%.0f&tdsB=%.0f&phA=%.2f&phB=%.2f&ecA=%.2f&ecB=%.2f&statusA=%s&statusB=%s",
               googleScriptURL,
-              s_tempA, s_tdsA, s_phA, s_ecA, statusPanelA.c_str(),
-              s_tempB, s_tdsB, s_phB, s_ecB, statusPanelB.c_str());
+              s_tempA, s_tempB, s_tdsA, s_tdsB, s_phA, s_phB, s_ecA, s_ecB, statusPanelA.c_str(), statusPanelB.c_str());
 
     HTTPClient http;
     http.begin(urlBuffer);
@@ -371,7 +333,6 @@ void setupWebServer() {
     TargetNutrisiEC target = getTargetNutrisiEC(umurTanamanHari); 
     String fuzzyTargetMessage = "EC " + String(target.ec_bawah, 1) + "-" + String(target.ec_atas, 1);
     
-    // Tentukan pesan keputusan berdasarkan status pompa
     if(isDosing) {
         fuzzyDecisionMessage = "Dosis Otomatis Aktif";
     } else {
@@ -394,15 +355,12 @@ void setupWebServer() {
     r->send(200, "application/json", json);
   });
 
-  // --- PERUBAHAN BARU: Endpoint untuk menerima data dari Panel B ---
   server.on("/updateB", HTTP_GET, [](AsyncWebServerRequest *r){
     if(r->hasParam("ph") && r->hasParam("tds") && r->hasParam("temp")){
-      // Update variabel global untuk Panel B
       phB = r->getParam("ph")->value().toFloat();
       tdsB = r->getParam("tds")->value().toFloat();
       tempB = r->getParam("temp")->value().toFloat();
       ecB = hitungEC_from_TDS(tdsB);
-      // Langsung jalankan fuzzy status untuk data B yang baru masuk
       statusPanelB = runStatusFuzzyLogic(tempB, phB, tdsB);
       r->send(200, "text/plain", "OK");
     } else {
@@ -485,9 +443,7 @@ void setupWebServer() {
   server.begin();
 }
 
-// =================================================================================
 // --- FUNGSI SETUP ---
-// =================================================================================
 void setup() {
   Serial.begin(115200);
   delay(100);
@@ -536,22 +492,20 @@ void setup() {
   setupWebServer();
 }
 
-// =================================================================================
 // --- FUNGSI LOOP UTAMA ---
-// =================================================================================
 void loop() {
   unsigned long now = millis();
   
   if (now - prevMillis >= interval && !isDosing) {
     prevMillis = now;
     bacaSensorA();
-    statusPanelA = runStatusFuzzyLogic(tempA, phA, tdsA); // Jalankan fuzzy status untuk Panel A
+    statusPanelA = runStatusFuzzyLogic(tempA, phA, tdsA);
     Serial.printf("\nSuhu=%.1f C, TDS=%.0f ppm, pH=%.2f, EC=%.2f\n", tempA, tdsA, phA, ecA);
     updateLCD16x2();
     kirimDataKeGoogleSheet();
 
     if (modeOtomatis) {
-      runPumpController(); // Jalankan fuzzy kontrol pompa
+      runPumpController();
     } else {
       dosingStatusMessage = "Mode Manual Aktif";
     }
@@ -580,3 +534,4 @@ void loop() {
   handleSerialCommands();
   delay(10);
 }
+
