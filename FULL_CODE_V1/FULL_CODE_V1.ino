@@ -1,12 +1,12 @@
 /******************************************************************************
  * Proyek: Smart Watering Melon Tech Nusa Putra Riset BIMA
- * Versi: UI & LOGIC FINAL
+ * Versi: UI & LOGIC FINAL (REVISED)
  * Deskripsi: Implementasi DUA sistem Fuzzy Logic dengan UI Dashboard baru.
  * PERUBAHAN UTAMA:
  * - UI Dashboard dirombak untuk menggabungkan "Pengaturan Hari" dan "EC Control"
  * menjadi satu kotak, sehingga total menjadi 9 kotak.
- * - Logika penerimaan data dari Control Panel B disempurnakan.
- * - Kalibrasi pompa dan logika fuzzy tetap sama.
+ * - Fungsi readVoltageADC disederhanakan untuk meningkatkan keandalan pembacaan sensor.
+ * - Menambahkan output diagnostik untuk voltase mentah sensor.
  ******************************************************************************/
 
 // =================================================================================
@@ -25,8 +25,8 @@
 // =================================================================================
 // --- KONFIGURASI & PINOUT ---
 // =================================================================================
-const char* ssid = "pouio";
-const char* password = "11111111";
+const char* ssid = "ADVAN V1 PRO-8F7379";
+const char* password = "7C27964D";
 const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbza7UY-t0Vfg44QDsy8fXMQI3lEo7SQEFJOfgjJry793MSYQ6djG10-bR0zSHH67_1LTg/exec"; // Nanti perlu di-update
 #define SENSOR_TDS_PIN          34
 #define SENSOR_PH_PIN           35
@@ -97,7 +97,19 @@ const char index_html[] PROGMEM = R"=====(
 // --- FUNGSI-FUNGSI BANTU ---
 // =================================================================================
 float linInterp(float x, float x0, float x1, float y0, float y1) { if (x1 - x0 == 0) return y0; return y0 + (y1 - y0) * ((x - x0) / (x1 - x0)); }
-float readVoltageADC(int pin) { const int NUM_SAMPLES = 40; const int TRIM_COUNT = 5; const float VREF = 3.3; uint16_t samples[NUM_SAMPLES]; for (int i = 0; i < NUM_SAMPLES; i++) { samples[i] = analogRead(pin); delay(2); } for (int i = 0; i < NUM_SAMPLES - 1; i++) { for (int j = i + 1; j < NUM_SAMPLES; j++) { if (samples[i] > samples[j]) { uint16_t temp = samples[i]; samples[i] = samples[j]; samples[j] = temp; } } } long sum = 0; for (int i = TRIM_COUNT; i < NUM_SAMPLES - TRIM_COUNT; i++) { sum += samples[i]; } float avg_raw = (float)sum / (NUM_SAMPLES - 2 * TRIM_COUNT); return avg_raw / 4095.0 * VREF; }
+
+float readVoltageADC(int pin) {
+  const int NUM_SAMPLES = 40;
+  const float VREF = 3.3;
+  long sum = 0;
+  for (int i = 0; i < NUM_SAMPLES; i++) {
+    sum += analogRead(pin);
+    delay(2);
+  }
+  float raw = (float)sum / NUM_SAMPLES;
+  return raw / 4095.0 * VREF;
+}
+
 float readTemperatureSensor() { sensors.requestTemperatures(); float t = sensors.getTempCByIndex(0); if (t == DEVICE_DISCONNECTED_C || t < -20 || t > 80) return 25.0; return t; }
 float hitungEC_from_TDS(float tdsValue) { if (PPM_TO_EC_CONVERSION_FACTOR == 0) return 0; return tdsValue / PPM_TO_EC_CONVERSION_FACTOR; }
 float readpH(float v_ph, float temp_celsius) { if (ph_slope == 0.0) return 0.0; float compensated_slope = ph_slope * (temp_celsius + 273.15) / (25.0 + 273.15); float ph_value = 7.0 + (ph_neutral_v - v_ph) / compensated_slope; ph_value += PH_AIR_OFFSET; return constrain(ph_value, 0.0, 14.0); }
@@ -108,6 +120,8 @@ float readpH(float v_ph, float temp_celsius) { if (ph_slope == 0.0) return 0.0; 
 void bacaSensorA() {
   tempA = readTemperatureSensor();
   float measuredVoltage_TDS = readVoltageADC(SENSOR_TDS_PIN);
+  Serial.printf("DIAG: Raw Voltage TDS: %.4fV\n", measuredVoltage_TDS); // DIAGNOSTIK
+  
   if (measuredVoltage_TDS < VOLTAGE_THRESHOLD_TDS_DRY) { 
     tdsA = 0.0; 
   } else {
@@ -120,7 +134,10 @@ void bacaSensorA() {
     tdsA = compensatedTds;
   }
   ecA = hitungEC_from_TDS(tdsA);
+
   float v_ph = readVoltageADC(SENSOR_PH_PIN); 
+  Serial.printf("DIAG: Raw Voltage pH: %.4fV\n", v_ph); // DIAGNOSTIK
+
   if (v_ph >= VOLTAGE_THRESHOLD_PH_DRY) { phA = 7.0; } 
   else if (ph_slope != 0.0) { phA = readpH(v_ph, tempA); } 
   else { phA = 0.0; }
