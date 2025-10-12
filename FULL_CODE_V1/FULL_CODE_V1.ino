@@ -1,15 +1,8 @@
 /******************************************************************************
  * Proyek: Smart Watering Melon Tech Nusa Putra Riset BIMA
- * Versi: UI & LOGIC FINAL (DEBUG SUHU)
- * Deskripsi: Implementasi DUA sistem Fuzzy Logic dengan UI Dashboard baru.
- * PERUBAHAN UTAMA:
- * - Menambahkan output diagnostik pada fungsi baca sensor suhu untuk
- * membantu debugging masalah hardware (koneksi atau resistor pull-up).
+ * Versi: UI & LOGIC FINAL (CLEAN)
  ******************************************************************************/
 
-// =================================================================================
-// --- PUSTAKA (LIBRARIES) ---
-// =================================================================================
 #include <Arduino.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -20,12 +13,10 @@
 #include <EEPROM.h>
 #include <Fuzzy.h>
 
-// =================================================================================
 // --- KONFIGURASI & PINOUT ---
-// =================================================================================
 const char* ssid = "ADVAN V1 PRO-8F7379";
 const char* password = "7C27964D";
-const char* googleScriptURL = "REPLACE_WITH_YOUR_NEW_GOOGLE_SCRIPT_URL"; 
+const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbykPgTShvrR1f4P7--ePX_PreK6hs72qzP2epQvB62gPjbhT8BuM47060T0tFlP_ettiw/exec"; 
 #define SENSOR_TDS_PIN          34
 #define SENSOR_PH_PIN           35
 #define SENSOR_SUHU_PIN         4
@@ -51,9 +42,7 @@ const float VOLTAGE_HIGH_TDS  = 2.4509;
 const float PPM_HIGH_TDS      = 2610.0;
 const float VOLTAGE_THRESHOLD_TDS_DRY = 0.15;
 
-// =================================================================================
 // --- OBJEK & VARIABEL GLOBAL ---
-// =================================================================================
 Fuzzy *fuzzy_EC_Control = new Fuzzy();
 Fuzzy *fuzzy_Status_Check = new Fuzzy();
 
@@ -104,21 +93,7 @@ float readVoltageADC(int pin) {
   float raw = (float)sum / NUM_SAMPLES;
   return raw / 4095.0 * VREF;
 }
-
-float readTemperatureSensor() {
-  sensors.requestTemperatures();
-  float t = sensors.getTempCByIndex(0);
-  
-  // -- DIAGNOSTIK BARU --
-  Serial.printf("DIAG: Nilai mentah Suhu: %.2f\n", t);
-
-  if (t == DEVICE_DISCONNECTED_C || t < -20 || t > 80) {
-    Serial.println("WARNING: Gagal membaca sensor suhu, menggunakan nilai default 25.0C.");
-    return 25.0;
-  }
-  return t;
-}
-
+float readTemperatureSensor() { sensors.requestTemperatures(); float t = sensors.getTempCByIndex(0); if (t == DEVICE_DISCONNECTED_C || t < -20 || t > 80) return 25.0; return t; }
 float hitungEC_from_TDS(float tdsValue) { if (PPM_TO_EC_CONVERSION_FACTOR == 0) return 0; return tdsValue / PPM_TO_EC_CONVERSION_FACTOR; }
 float readpH(float v_ph, float temp_celsius) { if (ph_slope == 0.0) return 0.0; float compensated_slope = ph_slope * (temp_celsius + 273.15) / (25.0 + 273.15); float ph_value = 7.0 + (ph_neutral_v - v_ph) / compensated_slope; ph_value += PH_AIR_OFFSET; return constrain(ph_value, 0.0, 14.0); }
 
@@ -525,6 +500,7 @@ void loop() {
     prevMillis = now;
     bacaSensorA();
     statusPanelA = runStatusFuzzyLogic(tempA, phA, tdsA);
+    Serial.printf("\nSuhu=%.1f C, TDS=%.0f ppm, pH=%.2f, EC=%.2f\n", tempA, tdsA, phA, ecA);
     updateLCD16x2();
     kirimDataKeGoogleSheet();
 
