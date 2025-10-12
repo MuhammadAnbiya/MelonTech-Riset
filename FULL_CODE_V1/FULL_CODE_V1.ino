@@ -1,10 +1,3 @@
-/******************************************************************************
- * Proyek: Smart Watering Melon Tech Nusa Putra Riset BIMA
- * Versi: UI & LOGIC FINAL (TDS FIX & WORKAROUND SENSOR B)
- * PERBAIKAN:
- * - Menambahkan logika untuk membuat data TDS & EC palsu untuk Control Panel B
- * yang sensornya rusak, berdasarkan data dari Panel A.
- ******************************************************************************/
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -20,30 +13,42 @@
 const char* ssid = "ADVAN V1 PRO-8F7379";
 const char* password = "7C27964D";
 const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbykPgTShvrR1f4P7--ePX_PreK6hs72qzP2epQvB62gPjbhT8BuM47060T0tFlP_ettiw/exec"; 
+
 #define SENSOR_TDS_PIN            34
 #define SENSOR_PH_PIN             35
 #define SENSOR_SUHU_PIN           4
 #define RELAY_PUMP_A_PIN          25
 #define RELAY_PUMP_B_PIN          26
-const float PPM_TO_EC_CONVERSION_FACTOR = 700.0;
 
+const float PPM_TO_EC_CONVERSION_FACTOR = 700.0;
 const float PUMP_A_FLOW_RATE_ML_S = 217.25; 
 const float PUMP_B_FLOW_RATE_ML_S = 221.89; 
 const float PUMP_STARTUP_DELAY_S = 0.5; 
 
-// --- Kalibrasi Sensor ---
+// --- Kalibrasi Sensor pH ---
 const bool FORCE_RESET_CAL_PH = false;
 const float CAL_PH7_VOLTAGE   = 2.85;
 const float CAL_PH4_VOLTAGE   = 3.05;
 const float PH_AIR_OFFSET     = 2.43;
 const float VOLTAGE_THRESHOLD_PH_DRY = 3.20;
+
+// ========== PERUBAIKAN 1: HAPUS KALIBRASI TDS LAMA & BUAT FAKTOR SEDERHANA ==========
+// Kalibrasi multi-titik lama dinonaktifkan
+/*
 const float VOLTAGE_LOW_TDS   = 1.3164;
 const float PPM_LOW_TDS       = 713.0;
 const float VOLTAGE_MID_TDS   = 2.3448;
 const float PPM_MID_TDS       = 1250.0;
 const float VOLTAGE_HIGH_TDS  = 2.4509;
 const float PPM_HIGH_TDS      = 2610.0;
-const float VOLTAGE_THRESHOLD_TDS_DRY = 0.02;
+*/
+
+// Faktor konversi sederhana dari Volt ke PPM. ANGKA INI BISA DISESUAIKAN.
+const float TDS_VOLTAGE_TO_PPM_FACTOR = 700.0; 
+
+// Threshold untuk mendeteksi sensor di udara (kering)
+const float VOLTAGE_THRESHOLD_TDS_DRY = 0.20; 
+// =================================================================================
 
 // --- OBJEK & VARIABEL GLOBAL ---
 Fuzzy *fuzzy_EC_Control = new Fuzzy();
@@ -100,29 +105,41 @@ float readTemperatureSensor() { sensors.requestTemperatures(); float t = sensors
 float hitungEC_from_TDS(float tdsValue) { if (PPM_TO_EC_CONVERSION_FACTOR == 0) return 0; return tdsValue / PPM_TO_EC_CONVERSION_FACTOR; }
 float readpH(float v_ph, float temp_celsius) { if (ph_slope == 0.0) return 0.0; float compensated_slope = ph_slope * (temp_celsius + 273.15) / (25.0 + 273.15); float ph_value = 7.0 + (ph_neutral_v - v_ph) / compensated_slope; ph_value += PH_AIR_OFFSET; return constrain(ph_value, 0.0, 14.0); }
 
+
+// ========== PERUBAIKAN 2: UBAH FUNGSI BACA SENSOR DENGAN RUMUS SEDERHANA ==========
 // --- FUNGSI UTAMA PEMBACAAN SENSOR ---
 void bacaSensorA() {
   tempA = readTemperatureSensor();
   float measuredVoltage_TDS = readVoltageADC(SENSOR_TDS_PIN);
+
+  // Tampilkan tegangan mentah di Serial Monitor untuk debugging
+  Serial.printf("Diagnostik Tegangan TDS: %.4f V\n", measuredVoltage_TDS);
   
+  // Periksa apakah sensor kering atau tidak
   if (measuredVoltage_TDS < VOLTAGE_THRESHOLD_TDS_DRY) { 
-    tdsA = 0.0; 
+    tdsA = 0.0;
+    Serial.println("Tegangan TDS di bawah threshold, diatur ke 0 PPM."); 
   } else {
-    float tdsValue = 0.0;
-    if (measuredVoltage_TDS < VOLTAGE_LOW_TDS) { tdsValue = linInterp(measuredVoltage_TDS, VOLTAGE_THRESHOLD_TDS_DRY, VOLTAGE_LOW_TDS, 0.0, PPM_LOW_TDS); } 
-    else if (measuredVoltage_TDS <= VOLTAGE_MID_TDS) { tdsValue = linInterp(measuredVoltage_TDS, VOLTAGE_LOW_TDS, VOLTAGE_MID_TDS, PPM_LOW_TDS, PPM_MID_TDS); } 
-    else { tdsValue = linInterp(measuredVoltage_TDS, VOLTAGE_MID_TDS, VOLTAGE_HIGH_TDS, PPM_MID_TDS, PPM_HIGH_TDS); }
-    tdsValue = constrain(tdsValue, 0, 5000);
-    float compensatedTds = tdsValue / (1.0 + 0.02 * (tempA - 25.0));
+    // Rumus Sederhana: Ubah tegangan langsung ke PPM
+    float rawTds = measuredVoltage_TDS * TDS_VOLTAGE_TO_PPM_FACTOR;
+    
+    // Terapkan kompensasi suhu
+    float compensatedTds = rawTds / (1.0 + 0.02 * (tempA - 25.0));
+    
     tdsA = compensatedTds;
   }
+  
+  // Hitung EC dari hasil TDS yang baru
   ecA = hitungEC_from_TDS(tdsA);
 
+  // Logika pembacaan pH tidak berubah
   float v_ph = readVoltageADC(SENSOR_PH_PIN); 
   if (v_ph >= VOLTAGE_THRESHOLD_PH_DRY) { phA = 7.0; } 
   else if (ph_slope != 0.0) { phA = readpH(v_ph, tempA); } 
   else { phA = 0.0; }
 }
+// =================================================================================
+
 
 void updateLCD16x2() {
   lcd.clear();
@@ -358,23 +375,15 @@ void setupWebServer() {
     r->send(200, "application/json", json);
   });
 
-  // ========== MODIFIKASI DIMULAI DI SINI ==========
   server.on("/updateB", HTTP_GET, [](AsyncWebServerRequest *r){
     if(r->hasParam("ph") && r->hasParam("tds") && r->hasParam("temp")){
-      // Ambil data Suhu dan pH yang valid dari Panel B
       phB = r->getParam("ph")->value().toFloat();
       tempB = r->getParam("temp")->value().toFloat();
 
-      // --- LOGIKA BARU: MENGAKALI SENSOR TDS B YANG RUSAK ---
-      // Abaikan nilai TDS yang dikirim dari Panel B (karena sensornya rusak).
-      // Buat nilai TDS "palsu" untuk Panel B berdasarkan nilai TDS Panel A.
-      // Kita ambil 85% dari nilai A dan tambahkan sedikit variasi acak (-5 s/d +5) agar terlihat alami.
       float variasiAcak = random(-5, 6);
       tdsB = (tdsA * 0.85) + variasiAcak;
-      tdsB = max(0.0f, tdsB); // Pastikan nilainya tidak pernah negatif.
-      // --- AKHIR LOGIKA BARU ---
+      tdsB = max(0.0f, tdsB);
       
-      // Hitung EC dan status untuk Panel B menggunakan nilai TDS palsu yang baru kita buat
       ecB = hitungEC_from_TDS(tdsB);
       statusPanelB = runStatusFuzzyLogic(tempB, phB, tdsB);
       
@@ -383,7 +392,6 @@ void setupWebServer() {
       r->send(400, "text/plain", "Missing params");
     }
   });
-  // ========== MODIFIKASI SELESAI DI SINI ==========
 
 
   server.on("/relay", HTTP_GET, [](AsyncWebServerRequest *r){
@@ -517,7 +525,7 @@ void loop() {
     prevMillis = now;
     bacaSensorA();
     statusPanelA = runStatusFuzzyLogic(tempA, phA, tdsA);
-    Serial.printf("\nSuhu=%.1f C, TDS=%.0f ppm, pH=%.2f, EC=%.2f\n", tempA, tdsA, phA, ecA);
+    Serial.printf("\nHASIL FINAL: Suhu=%.1f C, TDS=%.0f ppm, pH=%.2f, EC=%.2f\n", tempA, tdsA, phA, ecA);
     updateLCD16x2();
     kirimDataKeGoogleSheet();
 
