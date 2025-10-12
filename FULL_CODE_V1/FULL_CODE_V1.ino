@@ -27,7 +27,7 @@
 // =================================================================================
 const char* ssid = "ADVAN V1 PRO-8F7379";
 const char* password = "7C27964D";
-const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbza7UY-t0Vfg44QDsy8fXMQI3lEo7SQEFJOfgjJry793MSYQ6djG10-bR0zSHH67_1LTg/exec"; // Nanti perlu di-update
+const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbyOwHUUnxrJS7XkWEbSF5lOyRsUjFB2b1fMXdv-uWvZv_eJlIJgdHDIoHopOoPLJ2r_Zw/exec"; // Nanti perlu di-update
 #define SENSOR_TDS_PIN          34
 #define SENSOR_PH_PIN           35
 #define SENSOR_SUHU_PIN         4
@@ -580,4 +580,3 @@ void loop() {
   handleSerialCommands();
   delay(10);
 }
-
