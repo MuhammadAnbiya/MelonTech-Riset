@@ -1,6 +1,6 @@
 /******************************************************************************
  * Proyek: Smart Watering Melon Tech Nusa Putra Riset BIMA
- * Versi: UI & LOGIC FINAL (PRODUCTION)
+ * Versi: UI & LOGIC FINAL (NTP INTEGRATED)
  ******************************************************************************/
 
 #include <Arduino.h>
@@ -13,11 +13,13 @@
 #include <EEPROM.h>
 #include <Fuzzy.h>
 #include <ArduinoJson.h>
+#include <WiFiUdp.h>
+#include <NTPClient.h>
 
 // --- KONFIGURASI & PINOUT ---
 const char* ssid = "ADVAN V1 PRO-8F7379";
 const char* password = "7C27964D";
-const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbyY6Rwxiqd-rMTIAuwcZZFKMlBIFGIf22jRbcix75FCCvaRszsKtf_9GDLV1iZuzhrAqw/exec"; 
+const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbykPgTShvrR1f4P7--ePX_PreK6hs72qzP2epQvB62gPjbhT8BuM47060T0tFlP_ettiw/exec"; 
 #define SENSOR_TDS_PIN          34
 #define SENSOR_PH_PIN           35
 #define SENSOR_SUHU_PIN         4
@@ -51,6 +53,11 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 AsyncWebServer server(80);
 OneWire oneWire(SENSOR_SUHU_PIN);
 DallasTemperature sensors(&oneWire);
+
+// --- Konfigurasi NTP ---
+WiFiUDP ntpUDP;
+const long utcOffsetInSeconds = 7 * 3600; // GMT+7 (WIB)
+NTPClient ntpClient(ntpUDP, "pool.ntp.org", utcOffsetInSeconds);
 
 float phA=0, tdsA=0, tempA=0, ecA=0.0;
 float phB=0, tdsB=0, tempB=0, ecB=0.0;
@@ -542,4 +549,3 @@ void loop() {
   handleSerialCommands();
   delay(10);
 }
-
