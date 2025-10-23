@@ -1,6 +1,6 @@
 /******************************************************************************
  * Proyek: Smart Watering Melon Tech Nusa Putra Riset BIMA
- * Versi: UI & LOGIC FINAL (NTP & DOSING FIX)
+ * Versi: UI & LOGIC FINAL (NTP & Dosing Fix)
  ******************************************************************************/
 
 #include <Arduino.h>
@@ -19,7 +19,7 @@
 // --- KONFIGURASI & PINOUT ---
 const char* ssid = "ADVAN V1 PRO-8F7379";
 const char* password = "7C27964D";
-const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbykPgTShvrR1f4P7--ePX_PreK6hs72qzP2epQvB62gPjbhT8BuM47060T0tFlP_ettiw/exec";
+const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbykPgTShvrR1f4P7--ePX_PreK6hs72qzP2epQvB62gPjbhT8BuM47060T0tFlP_ettiw/exec"; 
 #define SENSOR_TDS_PIN          34
 #define SENSOR_PH_PIN           35
 #define SENSOR_SUHU_PIN         4
@@ -27,9 +27,16 @@ const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbykPgTShv
 #define RELAY_PUMP_B_PIN        26
 const float PPM_TO_EC_CONVERSION_FACTOR = 700.0;
 
-const float PUMP_A_FLOW_RATE_ML_S = 217.25; 
-const float PUMP_B_FLOW_RATE_ML_S = 221.89; 
-const float PUMP_STARTUP_DELAY_S = 0.5; 
+// =================================================================================
+// --- PERBAIKAN ALGORITMA: KALIBRASI MULTI-TITIK BERDASARKAN DATA PENGUJIAN ---
+const float PUMP_A_CAL_TIME_MS[] = {0.0, 2805.0, 5102.0, 9703.0}; // Waktu untuk (0, 500, 1000, 2000) mL
+const float PUMP_A_CAL_ML[] =      {0.0, 320.0,  796.0,  1812.0}; // Volume aktual yang keluar
+
+const float PUMP_B_CAL_TIME_MS[] = {0.0, 2753.0, 5009.0, 9518.0}; // Waktu untuk (0, 500, 1000, 2000) mL
+const float PUMP_B_CAL_ML[] =      {0.0, 276.0,  700.0,  1708.0}; // Volume aktual yang keluar
+
+const int CAL_POINTS = 4; // Jumlah titik data kalibrasi (0, 500, 1000, 2000)
+// =================================================================================
 
 // --- Kalibrasi Sensor ---
 const bool FORCE_RESET_CAL_PH = false;
@@ -37,6 +44,8 @@ const float CAL_PH7_VOLTAGE   = 2.85;
 const float CAL_PH4_VOLTAGE   = 3.05;
 const float PH_AIR_OFFSET     = 2.43;
 const float VOLTAGE_THRESHOLD_PH_DRY = 3.20;
+
+// --- PERBAIKAN: Meng-uncomment konstanta TDS ---
 const float VOLTAGE_LOW_TDS   = 1.3164;
 const float PPM_LOW_TDS       = 713.0;
 const float VOLTAGE_MID_TDS   = 2.3448;
@@ -44,6 +53,7 @@ const float PPM_MID_TDS       = 1250.0;
 const float VOLTAGE_HIGH_TDS  = 2.4509;
 const float PPM_HIGH_TDS      = 2610.0;
 const float VOLTAGE_THRESHOLD_TDS_DRY = 0.02;
+// ----------------------------------------------
 
 // --- OBJEK & VARIABEL GLOBAL ---
 Fuzzy *fuzzy_EC_Control = new Fuzzy();
@@ -71,12 +81,14 @@ String dosingStatusMessage = "Idle";
 unsigned long prevMillis = 0;
 const long interval = 15000;
 
-// --- Variabel Dosis (diperbaiki) ---
 bool isDosing = false;
 unsigned long dosingStopA = 0; 
 unsigned long dosingStopB = 0; 
 bool dosingPumpA = false;
 bool dosingPumpB = false;
+
+bool doseB_is_pending = false;
+unsigned long durationB_pending_ms = 0;
 
 float ph_slope = 0.0;
 float ph_neutral_v = 0.0;
@@ -224,13 +236,15 @@ void runPumpController() {
   if (durasiNyala > 500) {
     isDosing = true;
     unsigned long now = millis();
-    dosingStopA = now + durasiNyala;
-    dosingStopB = now + durasiNyala;
-    dosingPumpA = true;
-    dosingPumpB = true;
     
+    // --- PERBAIKAN: LOGIKA DOSIS SEKUENSIAL ---
+    dosingStopA = now + durasiNyala; // Pompa A jalan dulu
+    dosingPumpA = true;
     digitalWrite(RELAY_PUMP_A_PIN, LOW);
-    digitalWrite(RELAY_PUMP_B_PIN, LOW);
+    
+    doseB_is_pending = true; // Pompa B menunggu
+    durationB_pending_ms = durasiNyala; // Simpan durasi untuk Pompa B
+    // ----------------------------------------
     
     dosingStatusMessage = "Dosis Otomatis " + String(durasiNyala) + " ms...";
   }
@@ -298,6 +312,22 @@ String runStatusFuzzyLogic(float suhu, float ph, float tds) {
   return "Cukup";
 }
 
+// --- FUNGSI BARU: INTERPOLASI MULTI-TITIK ---
+unsigned long getAccurateDosingTime(float targetML, const float cal_ml[], const float cal_ms[], int points) {
+  if (targetML <= 0) return 0;
+
+  // 1. Temukan segmen yang benar untuk interpolasi
+  for (int i = 1; i < points; i++) {
+    if (targetML <= cal_ml[i]) {
+      // Ditemukan segmen: antara [i-1] dan [i]
+      return (unsigned long)linInterp(targetML, cal_ml[i-1], cal_ml[i], cal_ms[i-1], cal_ms[i]);
+    }
+  }
+  
+  // 2. Jika targetML lebih besar dari data kalibrasi (misal 3000ml), ekstrapolasi
+  return (unsigned long)linInterp(targetML, cal_ml[points-2], cal_ml[points-1], cal_ms[points-2], cal_ms[points-1]);
+}
+
 
 // --- KOMUNIKASI & WEB SERVER ---
 void kirimDataKeGoogleSheet() {
@@ -311,7 +341,7 @@ void kirimDataKeGoogleSheet() {
     float s_phB   = isnan(phB)   || isinf(phB)   ? 0.0 : phB;
     float s_ecB   = isnan(ecB)   || isinf(ecB)   ? 0.0 : ecB;
     
-    // --- PERBAIKAN: Menggunakan epochTime untuk format yang stabil ---
+    // Menggunakan waktu dari NTP
     time_t epochTime = ntpClient.getEpochTime();
     struct tm *ptm = gmtime((time_t *)&epochTime);
     char tanggal[11]; // YYYY-MM-DD
@@ -320,7 +350,6 @@ void kirimDataKeGoogleSheet() {
     char waktu[9]; // HH:MM:SS
     strftime(waktu, sizeof(waktu), "%H:%M:%S", ptm);
 
-    // Daftar nama hari
     const char* hariArr[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
     String hari = hariArr[ptm->tm_wday];
     
@@ -368,7 +397,11 @@ void setupWebServer() {
     String fuzzyTargetMessage = "EC " + String(target.ec_bawah, 1) + "-" + String(target.ec_atas, 1);
     
     if(isDosing) {
-        fuzzyDecisionMessage = "Dosis Otomatis Aktif";
+        if(doseB_is_pending) {
+            fuzzyDecisionMessage = "Dosis A... (B Menunggu)";
+        } else {
+            fuzzyDecisionMessage = "Dosis B (Sekuensial)...";
+        }
     } else {
         fuzzyDecisionMessage = "Pompa Idle";
     }
@@ -455,30 +488,38 @@ void setupWebServer() {
       String responseMessage = "Dosing ";
 
       if (pump == "A") {
-        durationA_ms = (PUMP_STARTUP_DELAY_S + (ml / PUMP_A_FLOW_RATE_ML_S)) * 1000;
+        durationA_ms = getAccurateDosingTime(ml, PUMP_A_CAL_ML, PUMP_A_CAL_TIME_MS, CAL_POINTS);
         responseMessage += String(ml, 0) + "mL Pump A...";
       } else if (pump == "B") {
-        durationB_ms = (PUMP_STARTUP_DELAY_S + (ml / PUMP_B_FLOW_RATE_ML_S)) * 1000;
+        durationB_ms = getAccurateDosingTime(ml, PUMP_B_CAL_ML, PUMP_B_CAL_TIME_MS, CAL_POINTS);
         responseMessage += String(ml, 0) + "mL Pump B...";
       } else if (pump == "both") {
         float ml_each = ml / 2.0;
-        durationA_ms = (PUMP_STARTUP_DELAY_S + (ml_each / PUMP_A_FLOW_RATE_ML_S)) * 1000;
-        durationB_ms = (PUMP_STARTUP_DELAY_S + (ml_each / PUMP_B_FLOW_RATE_ML_S)) * 1000;
-        responseMessage += String(ml, 0) + "mL Total (A+B)...";
+        durationA_ms = getAccurateDosingTime(ml_each, PUMP_A_CAL_ML, PUMP_A_CAL_TIME_MS, CAL_POINTS);
+        durationB_ms = getAccurateDosingTime(ml_each, PUMP_B_CAL_ML, PUMP_B_CAL_TIME_MS, CAL_POINTS);
+        responseMessage += String(ml, 0) + "mL Total (Sekuensial)...";
       }
 
       isDosing = true;
       unsigned long now = millis();
       dosingPumpA = (durationA_ms > 0);
-      dosingPumpB = (durationB_ms > 0);
+      dosingPumpB = false; // Pompa B belum jalan
       dosingStopA = 0; 
       dosingStopB = 0;
+      doseB_is_pending = false;
+      durationB_pending_ms = 0;
 
       if (dosingPumpA) {
         dosingStopA = now + durationA_ms;
         digitalWrite(RELAY_PUMP_A_PIN, LOW);
-      }
-      if (dosingPumpB) {
+        
+        if (pump == "both" && durationB_ms > 0) {
+          doseB_is_pending = true;
+          durationB_pending_ms = durationB_ms;
+        }
+      } else if (durationB_ms > 0) {
+        // Jika hanya Pompa B yang jalan
+        dosingPumpB = true;
         dosingStopB = now + durationB_ms;
         digitalWrite(RELAY_PUMP_B_PIN, LOW);
       }
@@ -553,9 +594,7 @@ void loop() {
   
   if (now - prevMillis >= interval && !isDosing) {
     prevMillis = now;
-    
     ntpClient.update(); 
-    
     bacaSensorA();
     statusPanelA = runStatusFuzzyLogic(tempA, phA, tdsA);
     Serial.printf("\nSuhu=%.1f C, TDS=%.0f ppm, pH=%.2f, EC=%.2f\n", tempA, tdsA, phA, ecA);
@@ -570,19 +609,39 @@ void loop() {
   }
 
   if (isDosing) {
+    bool pumpA_was_running = dosingPumpA;
+
+    // Cek Pompa A
     if (dosingPumpA && (now >= dosingStopA)) {
       digitalWrite(RELAY_PUMP_A_PIN, HIGH);
       dosingPumpA = false;
+      dosingStopA = 0;
       Serial.println("Dosis Pompa A Selesai.");
     }
     
+    // --- LOGIKA SEKUENSIAL ---
+    // Jika Pompa A baru saja selesai DAN Pompa B sedang menunggu
+    if (pumpA_was_running && !dosingPumpA && doseB_is_pending) {
+      Serial.println("Memulai Dosis Pompa B (Sekuensial)...");
+      dosingStopB = now + durationB_pending_ms;
+      dosingPumpB = true;
+      digitalWrite(RELAY_PUMP_B_PIN, LOW);
+      
+      doseB_is_pending = false;
+      durationB_pending_ms = 0;
+    }
+    // ------------------------
+
+    // Cek Pompa B
     if (dosingPumpB && (now >= dosingStopB)) {
       digitalWrite(RELAY_PUMP_B_PIN, HIGH);
       dosingPumpB = false;
+      dosingStopB = 0;
       Serial.println("Dosis Pompa B Selesai.");
     }
 
-    if (!dosingPumpA && !dosingPumpB) {
+    // Cek apakah semua proses dosis sudah selesai
+    if (!dosingPumpA && !dosingPumpB && !doseB_is_pending) {
       isDosing = false;
       dosingStatusMessage = "Dosing complete. Idle.";
     }
@@ -591,3 +650,4 @@ void loop() {
   handleSerialCommands();
   delay(10);
 }
+
