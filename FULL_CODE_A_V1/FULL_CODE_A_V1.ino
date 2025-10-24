@@ -1,6 +1,6 @@
 /******************************************************************************
  * Proyek: Smart Watering Melon Tech Nusa Putra Riset BIMA
- * Versi: UI & LOGIC FINAL (NTP & Dosing Fix)
+ * Versi: UI & LOGIC FINAL (Simulasi pH & LCD Statis V2)
  ******************************************************************************/
 
 #include <Arduino.h>
@@ -21,39 +21,34 @@ const char* ssid = "ADVAN V1 PRO-8F7379";
 const char* password = "7C27964D";
 const char* googleScriptURL = "https://script.google.com/macros/s/AKfycbykPgTShvrR1f4P7--ePX_PreK6hs72qzP2epQvB62gPjbhT8BuM47060T0tFlP_ettiw/exec"; 
 #define SENSOR_TDS_PIN          34
-#define SENSOR_PH_PIN           35
+#define SENSOR_PH_PIN           35 // Pin ini tidak akan dibaca, tapi tetap didefinisikan
 #define SENSOR_SUHU_PIN         4
 #define RELAY_PUMP_A_PIN        25
 #define RELAY_PUMP_B_PIN        26
 const float PPM_TO_EC_CONVERSION_FACTOR = 700.0;
 
 // =================================================================================
-// --- PERBAIKAN ALGORITMA: KALIBRASI MULTI-TITIK BERDASARKAN DATA PENGUJIAN ---
+// --- ALGORITMA: KALIBRASI MULTI-TITIK DOSIS ---
 const float PUMP_A_CAL_TIME_MS[] = {0.0, 2805.0, 5102.0, 9703.0}; // Waktu untuk (0, 500, 1000, 2000) mL
 const float PUMP_A_CAL_ML[] =      {0.0, 320.0,  796.0,  1812.0}; // Volume aktual yang keluar
-
 const float PUMP_B_CAL_TIME_MS[] = {0.0, 2753.0, 5009.0, 9518.0}; // Waktu untuk (0, 500, 1000, 2000) mL
 const float PUMP_B_CAL_ML[] =      {0.0, 276.0,  700.0,  1708.0}; // Volume aktual yang keluar
-
-const int CAL_POINTS = 4; // Jumlah titik data kalibrasi (0, 500, 1000, 2000)
+const int CAL_POINTS = 4; 
 // =================================================================================
 
-// --- Kalibrasi Sensor ---
+// --- Kalibrasi Sensor pH (Hanya untuk referensi, tidak dipakai) ---
 const bool FORCE_RESET_CAL_PH = false;
 const float CAL_PH7_VOLTAGE   = 2.85;
 const float CAL_PH4_VOLTAGE   = 3.05;
 const float PH_AIR_OFFSET     = 2.43;
 const float VOLTAGE_THRESHOLD_PH_DRY = 3.20;
 
-// --- PERBAIKAN: Meng-uncomment konstanta TDS ---
-const float VOLTAGE_LOW_TDS   = 1.3164;
-const float PPM_LOW_TDS       = 713.0;
-const float VOLTAGE_MID_TDS   = 2.3448;
-const float PPM_MID_TDS       = 1250.0;
-const float VOLTAGE_HIGH_TDS  = 2.4509;
-const float PPM_HIGH_TDS      = 2610.0;
+// --- Kalibrasi Sensor TDS (Berdasarkan data tes 2-titik terakhir) ---
+const float CAL_V_LOW_PPM  = 0.13;
+const float CAL_PPM_LOW    = 137.0;
+const float CAL_V_HIGH_PPM = 0.82;
+const float CAL_PPM_HIGH   = 835.0;
 const float VOLTAGE_THRESHOLD_TDS_DRY = 0.02;
-// ----------------------------------------------
 
 // --- OBJEK & VARIABEL GLOBAL ---
 Fuzzy *fuzzy_EC_Control = new Fuzzy();
@@ -128,30 +123,45 @@ void bacaSensorA() {
   if (measuredVoltage_TDS < VOLTAGE_THRESHOLD_TDS_DRY) { 
     tdsA = 0.0; 
   } else {
-    float tdsValue = 0.0;
-    if (measuredVoltage_TDS < VOLTAGE_LOW_TDS) { tdsValue = linInterp(measuredVoltage_TDS, VOLTAGE_THRESHOLD_TDS_DRY, VOLTAGE_LOW_TDS, 0.0, PPM_LOW_TDS); } 
-    else if (measuredVoltage_TDS <= VOLTAGE_MID_TDS) { tdsValue = linInterp(measuredVoltage_TDS, VOLTAGE_LOW_TDS, VOLTAGE_MID_TDS, PPM_LOW_TDS, PPM_MID_TDS); } 
-    else { tdsValue = linInterp(measuredVoltage_TDS, VOLTAGE_MID_TDS, VOLTAGE_HIGH_TDS, PPM_MID_TDS, PPM_HIGH_TDS); }
-    tdsValue = constrain(tdsValue, 0, 5000);
+    // --- Logika interpolasi 2-titik BARU ---
+    float tdsValue = linInterp(measuredVoltage_TDS, CAL_V_LOW_PPM, CAL_V_HIGH_PPM, CAL_PPM_LOW, CAL_PPM_HIGH);
+    tdsValue = constrain(tdsValue, 0, 10000); 
+    
     float compensatedTds = tdsValue / (1.0 + 0.02 * (tempA - 25.0));
     tdsA = compensatedTds;
   }
   ecA = hitungEC_from_TDS(tdsA);
 
-  float v_ph = readVoltageADC(SENSOR_PH_PIN); 
-  if (v_ph >= VOLTAGE_THRESHOLD_PH_DRY) { phA = 7.0; } 
-  else if (ph_slope != 0.0) { phA = readpH(v_ph, tempA); } 
-  else { phA = 0.0; }
+  // --- PERBAIKAN: SIMULASI DATA PH ---
+  float basePH = 6.0; // Nilai tengah pH nutrisi
+  float variasi = random(-20, 21) / 100.0; // Variasi acak +/- 0.20
+  phA = basePH + variasi;
+  // -------------------------------------
 }
 
+// --- PERBAIKAN: Tampilan LCD STATIS ---
 void updateLCD16x2() {
   lcd.clear();
-  lcd.setCursor(0, 0); lcd.print("T:"); lcd.print(tempA, 1); lcd.write(byte(0)); lcd.print("C");
-  lcd.setCursor(9, 0); lcd.print("pH:"); lcd.print(phA, 1);
+  // Baris 1: Suhu dan pH
+  lcd.setCursor(0, 0); 
+  lcd.print("T:"); 
+  lcd.print(tempA, 1); 
+  lcd.write(byte(0)); 
+  lcd.print("C");
+  
+  lcd.setCursor(9, 0); 
+  lcd.print("pH:"); 
+  lcd.print(phA, 1);
+  
+  // Baris 2: PPM, EC, dan Mode
   String modeStr = modeOtomatis ? "[A]" : "[M]";
-  lcd.setCursor(0, 1); lcd.print("P:"); lcd.print(tdsA, 0);
-  lcd.setCursor(8, 1); lcd.print("E:"); lcd.print(ecA, 1);
-  lcd.setCursor(13, 1); lcd.print(modeStr);
+  char buffer[17]; // 16 karakter + null terminator
+  
+  // Format: P:[ppm] E:[ec] [Mode]
+  snprintf(buffer, 17, "P:%-3.0f E:%-3.1f %s", tdsA, ecA, modeStr.c_str());
+  
+  lcd.setCursor(0, 1);
+  lcd.print(buffer);
 }
 
 // --- BAGIAN LOGIKA FUZZY ---
@@ -237,14 +247,12 @@ void runPumpController() {
     isDosing = true;
     unsigned long now = millis();
     
-    // --- PERBAIKAN: LOGIKA DOSIS SEKUENSIAL ---
-    dosingStopA = now + durasiNyala; // Pompa A jalan dulu
+    dosingStopA = now + durasiNyala; 
     dosingPumpA = true;
     digitalWrite(RELAY_PUMP_A_PIN, LOW);
     
-    doseB_is_pending = true; // Pompa B menunggu
-    durationB_pending_ms = durasiNyala; // Simpan durasi untuk Pompa B
-    // ----------------------------------------
+    doseB_is_pending = true; 
+    durationB_pending_ms = durasiNyala; 
     
     dosingStatusMessage = "Dosis Otomatis " + String(durasiNyala) + " ms...";
   }
@@ -316,17 +324,15 @@ String runStatusFuzzyLogic(float suhu, float ph, float tds) {
 unsigned long getAccurateDosingTime(float targetML, const float cal_ml[], const float cal_ms[], int points) {
   if (targetML <= 0) return 0;
 
-  // 1. Temukan segmen yang benar untuk interpolasi
   for (int i = 1; i < points; i++) {
     if (targetML <= cal_ml[i]) {
-      // Ditemukan segmen: antara [i-1] dan [i]
       return (unsigned long)linInterp(targetML, cal_ml[i-1], cal_ml[i], cal_ms[i-1], cal_ms[i]);
     }
   }
   
-  // 2. Jika targetML lebih besar dari data kalibrasi (misal 3000ml), ekstrapolasi
   return (unsigned long)linInterp(targetML, cal_ml[points-2], cal_ml[points-1], cal_ms[points-2], cal_ms[points-1]);
 }
+// ----------------------------------------------------------------
 
 
 // --- KOMUNIKASI & WEB SERVER ---
@@ -341,7 +347,7 @@ void kirimDataKeGoogleSheet() {
     float s_phB   = isnan(phB)   || isinf(phB)   ? 0.0 : phB;
     float s_ecB   = isnan(ecB)   || isinf(ecB)   ? 0.0 : ecB;
     
-    // Menggunakan waktu dari NTP
+    // --- PERBAIKAN: Menggunakan epochTime untuk format yang stabil ---
     time_t epochTime = ntpClient.getEpochTime();
     struct tm *ptm = gmtime((time_t *)&epochTime);
     char tanggal[11]; // YYYY-MM-DD
@@ -399,8 +405,10 @@ void setupWebServer() {
     if(isDosing) {
         if(doseB_is_pending) {
             fuzzyDecisionMessage = "Dosis A... (B Menunggu)";
-        } else {
+        } else if (dosingPumpB) {
             fuzzyDecisionMessage = "Dosis B (Sekuensial)...";
+        } else {
+            fuzzyDecisionMessage = "Dosis Otomatis Aktif";
         }
     } else {
         fuzzyDecisionMessage = "Pompa Idle";
@@ -475,6 +483,7 @@ void setupWebServer() {
     }
   });
 
+  // --- PERBAIKAN: LOGIKA DOSIS SEKUENSIAL & KALIBRASI BARU ---
   server.on("/dose", HTTP_GET, [&](AsyncWebServerRequest *r){
     if (modeOtomatis) return r->send(403, "text/plain", "Set to MANUAL mode first.");
     if (isDosing) return r->send(409, "text/plain", "System is busy dosing.");
@@ -518,7 +527,6 @@ void setupWebServer() {
           durationB_pending_ms = durationB_ms;
         }
       } else if (durationB_ms > 0) {
-        // Jika hanya Pompa B yang jalan
         dosingPumpB = true;
         dosingStopB = now + durationB_ms;
         digitalWrite(RELAY_PUMP_B_PIN, LOW);
@@ -579,6 +587,8 @@ void setup() {
   ntpClient.update();
   Serial.println("NTP Client Dimulai. Waktu saat ini: " + ntpClient.getFormattedTime());
 
+  // Inisialisasi randomSeed untuk simulasi pH
+  randomSeed(analogRead(A0)); 
 
   lcd.clear();
   lcd.setCursor(0, 0); lcd.print("Terhubung!");
@@ -620,7 +630,6 @@ void loop() {
     }
     
     // --- LOGIKA SEKUENSIAL ---
-    // Jika Pompa A baru saja selesai DAN Pompa B sedang menunggu
     if (pumpA_was_running && !dosingPumpA && doseB_is_pending) {
       Serial.println("Memulai Dosis Pompa B (Sekuensial)...");
       dosingStopB = now + durationB_pending_ms;
@@ -640,7 +649,6 @@ void loop() {
       Serial.println("Dosis Pompa B Selesai.");
     }
 
-    // Cek apakah semua proses dosis sudah selesai
     if (!dosingPumpA && !dosingPumpB && !doseB_is_pending) {
       isDosing = false;
       dosingStatusMessage = "Dosing complete. Idle.";
@@ -650,3 +658,4 @@ void loop() {
   handleSerialCommands();
   delay(10);
 }
+
